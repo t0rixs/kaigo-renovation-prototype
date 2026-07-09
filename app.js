@@ -54,6 +54,7 @@ const estimatePageList = document.querySelector("#estimatePageList");
 const estimatePageTotals = document.querySelector("#estimatePageTotals");
 const productTableBody = document.querySelector("#productTableBody");
 const productForm = document.querySelector("#productForm");
+const toolStatus = document.querySelector("#toolStatus");
 
 const fields = {
   type: document.querySelector("#editType"),
@@ -97,6 +98,25 @@ function setTool(tool) {
   document.querySelectorAll(".tool").forEach((button) => {
     button.classList.toggle("active", button.dataset.tool === tool);
   });
+  updateToolStatus();
+}
+
+function updateToolStatus() {
+  if (!toolStatus) return;
+  if (state.tool === "select") {
+    toolStatus.textContent = "選択モード";
+    return;
+  }
+  if (state.tool === "room") {
+    toolStatus.textContent = `${state.roomLabel}を配置中`;
+    return;
+  }
+  if (state.tool.startsWith("fixture:")) {
+    const fixture = fixtures.find((item) => item[0] === state.tool.split(":")[1]);
+    toolStatus.textContent = `${fixture?.[1] || "設備"}を配置中`;
+    return;
+  }
+  toolStatus.textContent = `${typeLabel(state.tool)}を作成中`;
 }
 
 function getCanvasPoint(event) {
@@ -220,6 +240,7 @@ function renderFixtures() {
       setTool(`fixture:${fixture[0]}`);
       document.querySelectorAll(".fixture-tool").forEach((item) => item.classList.remove("active"));
       button.classList.add("active");
+      updateToolStatus();
     });
     fixtureTools.appendChild(button);
   });
@@ -741,6 +762,7 @@ document.querySelectorAll(".tool").forEach((button) => {
     if (button.dataset.tool === "room") {
       document.querySelectorAll('.tool[data-tool="room"]').forEach((item) => item.classList.remove("active"));
       button.classList.add("active");
+      updateToolStatus();
     }
     document.querySelectorAll(".fixture-tool").forEach((item) => item.classList.remove("active"));
   });
