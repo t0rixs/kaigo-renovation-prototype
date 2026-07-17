@@ -1536,7 +1536,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   Widget _propertiesPanel() {
     final selected = state.selected;
-    return ColoredBox(
+    return Material(
       color: Colors.white,
       child: ListView(
         padding: const EdgeInsets.all(16),
