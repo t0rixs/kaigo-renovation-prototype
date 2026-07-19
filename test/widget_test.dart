@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:archive/archive.dart';
@@ -1766,6 +1767,32 @@ void main() {
     state.dispose();
   });
 
+  test('スライド戸記号は上下左右の壁と開口端へ揃う', () async {
+    for (final edge in WallEdge.values) {
+      final bounds = await slidingDoorInkBounds(edge);
+      final horizontal = edge == WallEdge.top || edge == WallEdge.bottom;
+
+      if (horizontal) {
+        expect(bounds.left, lessThanOrEqualTo(1), reason: '$edge の左枠');
+        expect(bounds.right, greaterThanOrEqualTo(98), reason: '$edge の右枠');
+      } else {
+        expect(bounds.top, lessThanOrEqualTo(1), reason: '$edge の上枠');
+        expect(bounds.bottom, greaterThanOrEqualTo(98), reason: '$edge の下枠');
+      }
+
+      switch (edge) {
+        case WallEdge.top:
+          expect(bounds.top, lessThanOrEqualTo(5), reason: '上壁との間隔');
+        case WallEdge.right:
+          expect(bounds.right, greaterThanOrEqualTo(98), reason: '右壁との間隔');
+        case WallEdge.bottom:
+          expect(bounds.bottom, greaterThanOrEqualTo(98), reason: '下壁との間隔');
+        case WallEdge.left:
+          expect(bounds.left, lessThanOrEqualTo(1), reason: '左壁との間隔');
+      }
+    }
+  });
+
   test('間取りの移動とサイズ変更に所属するドアが追従する', () {
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
@@ -2581,6 +2608,50 @@ Future<double> doorInkCenterX({required bool flipped}) async {
     }
   }
   return weightedX / darkPixelCount;
+}
+
+Future<ui.Rect> slidingDoorInkBounds(WallEdge edge) async {
+  const dimension = 100;
+  const size = ui.Size.square(100);
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  DoorPainter(
+    edge: edge,
+    selected: false,
+    flipped: false,
+    doorType: DoorType.sliding,
+  ).paint(canvas, size);
+  final image = await recorder.endRecording().toImage(dimension, dimension);
+  final bytes = (await image.toByteData(
+    format: ui.ImageByteFormat.rawRgba,
+  ))!.buffer.asUint8List();
+  image.dispose();
+
+  var minX = dimension;
+  var minY = dimension;
+  var maxX = 0;
+  var maxY = 0;
+  for (var y = 0; y < dimension; y++) {
+    for (var x = 0; x < dimension; x++) {
+      final offset = (y * dimension + x) * 4;
+      final isDarkStroke =
+          bytes[offset + 3] > 0 &&
+          bytes[offset] < 100 &&
+          bytes[offset + 1] < 120 &&
+          bytes[offset + 2] < 130;
+      if (!isDarkStroke) continue;
+      minX = math.min(minX, x);
+      minY = math.min(minY, y);
+      maxX = math.max(maxX, x);
+      maxY = math.max(maxY, y);
+    }
+  }
+  return ui.Rect.fromLTRB(
+    minX.toDouble(),
+    minY.toDouble(),
+    maxX.toDouble(),
+    maxY.toDouble(),
+  );
 }
 
 Future<ui.Offset> toiletInkCenter({

@@ -575,8 +575,9 @@ class DoorPainter extends CustomPainter {
     final edgeAtStart = edge == WallEdge.top || edge == WallEdge.left;
     final direction = edgeAtStart ? 1.0 : -1.0;
     final depth = horizontal ? size.height : size.width;
-    final panelGap = math.min(10.0, depth * .14);
-    final trackGap = panelGap * 2;
+    final panelGap = math.min(4.0, depth * .08);
+    final trackGap = math.min(10.0, depth * .16);
+    final arrowGap = math.min(22.0, trackGap + 8.0);
 
     if (horizontal) {
       final wallY = edge == WallEdge.top ? 0.0 : size.height;
@@ -584,16 +585,22 @@ class DoorPainter extends CustomPainter {
       final firstY = wallY + direction * panelGap;
       final secondY = wallY + direction * trackGap;
       canvas.drawLine(
-        Offset(size.width * .06, firstY),
+        Offset(0, firstY),
         Offset(size.width * .58, firstY),
         stroke,
       );
       canvas.drawLine(
         Offset(size.width * .42, secondY),
-        Offset(size.width * .94, secondY),
+        Offset(size.width, secondY),
         stroke,
       );
-      final arrowY = wallY + direction * math.min(28.0, depth * .42);
+      canvas.drawLine(Offset(0, wallY), Offset(0, firstY), stroke);
+      canvas.drawLine(
+        Offset(size.width, wallY),
+        Offset(size.width, secondY),
+        stroke,
+      );
+      final arrowY = wallY + direction * arrowGap;
       final arrowStart = Offset(size.width * .30, arrowY);
       final arrowEnd = Offset(size.width * .72, arrowY);
       canvas.drawLine(arrowStart, arrowEnd, stroke);
@@ -615,16 +622,22 @@ class DoorPainter extends CustomPainter {
     final firstX = wallX + direction * panelGap;
     final secondX = wallX + direction * trackGap;
     canvas.drawLine(
-      Offset(firstX, size.height * .06),
+      Offset(firstX, 0),
       Offset(firstX, size.height * .58),
       stroke,
     );
     canvas.drawLine(
       Offset(secondX, size.height * .42),
-      Offset(secondX, size.height * .94),
+      Offset(secondX, size.height),
       stroke,
     );
-    final arrowX = wallX + direction * math.min(28.0, depth * .42);
+    canvas.drawLine(Offset(wallX, 0), Offset(firstX, 0), stroke);
+    canvas.drawLine(
+      Offset(wallX, size.height),
+      Offset(secondX, size.height),
+      stroke,
+    );
+    final arrowX = wallX + direction * arrowGap;
     final arrowStart = Offset(arrowX, size.height * .30);
     final arrowEnd = Offset(arrowX, size.height * .72);
     canvas.drawLine(arrowStart, arrowEnd, stroke);
