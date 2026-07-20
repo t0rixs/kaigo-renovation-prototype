@@ -16,6 +16,8 @@ typedef WallSnap = ({
   double distance,
 });
 
+typedef LayoutWallOcclusion = ({WallEdge edge, int startMm, int endMm});
+
 enum OpeningAddResult { added, noWall, overlaps }
 
 class AppState extends ChangeNotifier {
@@ -481,6 +483,75 @@ class AppState extends ChangeNotifier {
           yMm >= inner.yMm &&
           yMm <= inner.yMm + inner.heightMm,
     );
+  }
+
+  List<LayoutWallOcclusion> layoutWallOcclusionsFor(PlanObject room) {
+    if (room.kind != PlanObjectKind.layout) return const [];
+    final roomIndex = objects.indexWhere((object) => object.id == room.id);
+    if (roomIndex < 0) return const [];
+
+    final roomRight = room.xMm + room.widthMm;
+    final roomBottom = room.yMm + room.heightMm;
+    final occlusions = <LayoutWallOcclusion>[];
+    for (final other
+        in objects
+            .skip(roomIndex + 1)
+            .where((object) => object.kind == PlanObjectKind.layout)) {
+      final otherRight = other.xMm + other.widthMm;
+      final otherBottom = other.yMm + other.heightMm;
+      final overlapLeft = math.max(room.xMm, other.xMm);
+      final overlapTop = math.max(room.yMm, other.yMm);
+      final overlapRight = math.min(roomRight, otherRight);
+      final overlapBottom = math.min(roomBottom, otherBottom);
+      if (overlapLeft >= overlapRight || overlapTop >= overlapBottom) continue;
+
+      final sameBounds =
+          room.xMm == other.xMm &&
+          room.yMm == other.yMm &&
+          roomRight == otherRight &&
+          roomBottom == otherBottom;
+      final roomContainsOther =
+          room.xMm <= other.xMm &&
+          room.yMm <= other.yMm &&
+          roomRight >= otherRight &&
+          roomBottom >= otherBottom;
+      final otherContainsRoom =
+          other.xMm <= room.xMm &&
+          other.yMm <= room.yMm &&
+          otherRight >= roomRight &&
+          otherBottom >= roomBottom;
+      if (!sameBounds && (roomContainsOther || otherContainsRoom)) continue;
+
+      if (other.yMm <= room.yMm && otherBottom >= room.yMm) {
+        occlusions.add((
+          edge: WallEdge.top,
+          startMm: overlapLeft,
+          endMm: overlapRight,
+        ));
+      }
+      if (other.yMm <= roomBottom && otherBottom >= roomBottom) {
+        occlusions.add((
+          edge: WallEdge.bottom,
+          startMm: overlapLeft,
+          endMm: overlapRight,
+        ));
+      }
+      if (other.xMm <= room.xMm && otherRight >= room.xMm) {
+        occlusions.add((
+          edge: WallEdge.left,
+          startMm: overlapTop,
+          endMm: overlapBottom,
+        ));
+      }
+      if (other.xMm <= roomRight && otherRight >= roomRight) {
+        occlusions.add((
+          edge: WallEdge.right,
+          startMm: overlapTop,
+          endMm: overlapBottom,
+        ));
+      }
+    }
+    return occlusions;
   }
 
   List<LayoutWallContact> sharedWallContactsFor(PlanObject room) {
@@ -968,7 +1039,20 @@ class AppState extends ChangeNotifier {
       }
       syncAttachedOpenings(item);
       _pruneSharedWallOverrides();
+      if (movedX != 0 || movedY != 0) _bringLayoutToFront(item);
     }
+  }
+
+  void _bringLayoutToFront(PlanObject item) {
+    final index = objects.indexWhere((object) => object.id == item.id);
+    if (index < 0 ||
+        !objects
+            .skip(index + 1)
+            .any((object) => object.kind == PlanObjectKind.layout)) {
+      return;
+    }
+    objects.removeAt(index);
+    objects.add(item);
   }
 
   void resizeObjectBy(PlanObject item, int dxMm, int dyMm) {

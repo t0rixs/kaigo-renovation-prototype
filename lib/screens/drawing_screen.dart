@@ -763,22 +763,46 @@ class _DrawingScreenState extends State<DrawingScreen> {
   Widget _layoutObject(PlanObject item, Rect rect, bool selected) {
     final size = rect.size;
     final contacts = state.sharedWallContactsFor(item);
-    final wallGaps = contacts
-        .where((contact) => !contact.visible)
-        .map(
-          (contact) => LayoutWallGap(
-            edge: contact.roomEdge,
-            start: _px(
-              contact.segment.startMm -
-                  (contact.segment.horizontal ? item.xMm : item.yMm),
-            ),
-            end: _px(
-              contact.segment.endMm -
-                  (contact.segment.horizontal ? item.xMm : item.yMm),
-            ),
-          ),
-        )
-        .toList();
+    final wallGaps =
+        contacts
+            .where((contact) => !contact.visible)
+            .map(
+              (contact) => LayoutWallGap(
+                edge: contact.roomEdge,
+                start: _px(
+                  contact.segment.startMm -
+                      (contact.segment.horizontal ? item.xMm : item.yMm),
+                ),
+                end: _px(
+                  contact.segment.endMm -
+                      (contact.segment.horizontal ? item.xMm : item.yMm),
+                ),
+              ),
+            )
+            .toList()
+          ..addAll(
+            state
+                .layoutWallOcclusionsFor(item)
+                .map(
+                  (occlusion) => LayoutWallGap(
+                    edge: occlusion.edge,
+                    start: _px(
+                      occlusion.startMm -
+                          (occlusion.edge == WallEdge.top ||
+                                  occlusion.edge == WallEdge.bottom
+                              ? item.xMm
+                              : item.yMm),
+                    ),
+                    end: _px(
+                      occlusion.endMm -
+                          (occlusion.edge == WallEdge.top ||
+                                  occlusion.edge == WallEdge.bottom
+                              ? item.xMm
+                              : item.yMm),
+                    ),
+                  ),
+                ),
+          );
     final cutouts = state
         .containedLayouts(item)
         .map(

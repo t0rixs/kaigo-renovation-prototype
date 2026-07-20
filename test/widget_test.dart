@@ -2423,12 +2423,123 @@ void main() {
     state.dispose();
   });
 
+  test('間取りは作成と移動で前面になりサイズ変更では順序を変えない', () {
+    final state = AppState();
+    state.addLayout(1000, 1000, 2000, 2000);
+    final first = state.objects.single;
+    state.addLayout(2000, 500, 2000, 2000);
+    final second = state.objects.last;
+
+    expect(
+      state.objects
+          .where((object) => object.kind == PlanObjectKind.layout)
+          .map((object) => object.id),
+      [first.id, second.id],
+    );
+
+    state.moveObjectBy(first, -250, 0);
+    expect(
+      state.objects
+          .where((object) => object.kind == PlanObjectKind.layout)
+          .map((object) => object.id),
+      [second.id, first.id],
+    );
+
+    state.resizeObjectBy(second, 250, 250);
+    expect(
+      state.objects
+          .where((object) => object.kind == PlanObjectKind.layout)
+          .map((object) => object.id),
+      [second.id, first.id],
+    );
+    state.dispose();
+  });
+
+  test('部分重複では前面の間取りが覆う背面の縁を検出する', () {
+    final state = AppState();
+    state.addLayout(1000, 1000, 2000, 2000);
+    final back = state.objects.single;
+    state.addLayout(2000, 500, 2000, 2000);
+    final front = state.objects.last;
+
+    final occlusions = state.layoutWallOcclusionsFor(back);
+    expect(occlusions.map((gap) => gap.edge).toSet(), {
+      WallEdge.top,
+      WallEdge.right,
+    });
+    expect(state.layoutWallOcclusionsFor(front), isEmpty);
+    state.dispose();
+  });
+
+  test('描画順が変わっても既存の間取り所属判定は変更しない', () {
+    final state = AppState();
+    state.addLayout(1000, 1000, 1000, 1000);
+    final smaller = state.objects.single..place = '小さい間取り';
+    state.addLayout(1500, 500, 2000, 2000);
+
+    expect(state.layoutAt(1750, 1500), same(smaller));
+    state.dispose();
+  });
+
+  testWidgets('部分重複した背面間取りの縁を描画から除外する', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AppState();
+    state.addLayout(1000, 1000, 2000, 2000);
+    final back = state.objects.single;
+    state.addLayout(2000, 500, 2000, 2000);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: state,
+            builder: (context, _) => DrawingScreen(state: state),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    var painters = tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((paint) => paint.painter)
+        .whereType<LayoutPainter>()
+        .toList();
+    expect(painters, hasLength(2));
+    expect(painters.first.wallGaps.map((gap) => gap.edge).toSet(), {
+      WallEdge.top,
+      WallEdge.right,
+    });
+    expect(painters.last.wallGaps, isEmpty);
+
+    state.moveObjectBy(back, -250, 0);
+    state.changed();
+    await tester.pump();
+    painters = tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((paint) => paint.painter)
+        .whereType<LayoutPainter>()
+        .toList();
+    expect(painters.first.wallGaps.map((gap) => gap.edge).toSet(), {
+      WallEdge.bottom,
+      WallEdge.left,
+    });
+    expect(painters.last.wallGaps, isEmpty);
+    expect(tester.takeException(), isNull);
+    state.dispose();
+  });
+
   test('完全に内包された間取りを外側間取りの領域から除外する', () {
     final state = AppState();
     state.addLayout(1000, 1000, 3000, 3000);
     final outer = state.objects.single;
     state.addLayout(1500, 1500, 1000, 1000);
     final inner = state.objects.last;
+    expect(state.layoutWallOcclusionsFor(outer), isEmpty);
+    expect(state.layoutWallOcclusionsFor(inner), isEmpty);
     state.addLayout(3750, 3750, 1000, 1000);
     final partial = state.objects.last;
 
