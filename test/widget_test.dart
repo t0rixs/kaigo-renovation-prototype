@@ -2092,6 +2092,46 @@ void main() {
     state.dispose();
   });
 
+  testWidgets('開き戸の詳細画面には吊元編集を表示しない', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AppState();
+    state.addLayout(1000, 1000, 2000, 2000);
+    state.addOpening(PlanObjectKind.door, 3000, 2000);
+    final door = state.objects.last;
+    state.flipDoor(door);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: state,
+            builder: (context, _) => DrawingScreen(state: state),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('属性を編集'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('ドアを編集'), findsOneWidget);
+    expect(find.text('戸種'), findsOneWidget);
+    expect(find.text('開き方向'), findsOneWidget);
+    expect(find.text('吊元'), findsNothing);
+    expect(find.text('標準'), findsNothing);
+    expect(find.text('左右反転'), findsNothing);
+
+    await tester.tap(find.text('反映する'));
+    await tester.pumpAndSettle();
+    expect(door.flipped, isTrue);
+    state.dispose();
+  });
+
   testWidgets('選択した開き戸を下部バーから内開き外開き切替できる', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;

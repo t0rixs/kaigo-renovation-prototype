@@ -1839,31 +1839,6 @@ class _DrawingScreenState extends State<DrawingScreen> {
                         onSelectionChanged: (values) =>
                             setSheetState(() => doorFlipped = values.first),
                       ),
-                    if (doorType == DoorType.swing) ...[
-                      const SizedBox(height: 16),
-                      const Text(
-                        '吊元',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 8),
-                      SegmentedButton<bool>(
-                        segments: const [
-                          ButtonSegment<bool>(
-                            value: false,
-                            icon: Icon(Icons.door_front_door_outlined),
-                            label: Text('標準'),
-                          ),
-                          ButtonSegment<bool>(
-                            value: true,
-                            icon: Icon(Icons.flip),
-                            label: Text('左右反転'),
-                          ),
-                        ],
-                        selected: {doorFlipped},
-                        onSelectionChanged: (values) =>
-                            setSheetState(() => doorFlipped = values.first),
-                      ),
-                    ],
                   ],
                   const SizedBox(height: 20),
                   FilledButton.icon(
