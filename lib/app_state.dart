@@ -20,6 +20,8 @@ typedef LayoutWallOcclusion = ({WallEdge edge, int startMm, int endMm});
 
 enum OpeningAddResult { added, noWall, overlaps }
 
+enum CanvasResizeEdge { top, right, bottom, left }
+
 class AppState extends ChangeNotifier {
   static const _legacyStorageKey = 'kaigo_renovation_project_v4_handrail';
   static const gridMm = 250;
@@ -360,6 +362,77 @@ class AppState extends ChangeNotifier {
     checkpoint();
     activeProject.canvasWidthMm = width;
     activeProject.canvasHeightMm = height;
+    changed();
+    return true;
+  }
+
+  int get minimumCanvasWidthFromLeftMm {
+    var minimumX = canvasWidthMm;
+    for (final item in objects) {
+      minimumX = math.min(minimumX, item.xMm);
+    }
+    for (final line in lines) {
+      minimumX = math.min(minimumX, math.min(line.x1Mm, line.x2Mm));
+    }
+    return math.max(gridMm, snapMm(canvasWidthMm - minimumX));
+  }
+
+  int get minimumCanvasHeightFromTopMm {
+    var minimumY = canvasHeightMm;
+    for (final item in objects) {
+      minimumY = math.min(minimumY, item.yMm);
+    }
+    for (final line in lines) {
+      minimumY = math.min(minimumY, math.min(line.y1Mm, line.y2Mm));
+    }
+    return math.max(gridMm, snapMm(canvasHeightMm - minimumY));
+  }
+
+  bool resizeCanvasFromEdge(
+    CanvasResizeEdge edge,
+    int dimensionMm, {
+    bool recordUndo = true,
+  }) {
+    final dimension = math.max(gridMm, snapMm(dimensionMm));
+    final currentDimension = switch (edge) {
+      CanvasResizeEdge.left || CanvasResizeEdge.right => canvasWidthMm,
+      CanvasResizeEdge.top || CanvasResizeEdge.bottom => canvasHeightMm,
+    };
+    final minimumDimension = switch (edge) {
+      CanvasResizeEdge.left => minimumCanvasWidthFromLeftMm,
+      CanvasResizeEdge.right => minimumCanvasWidthMm,
+      CanvasResizeEdge.top => minimumCanvasHeightFromTopMm,
+      CanvasResizeEdge.bottom => minimumCanvasHeightMm,
+    };
+    if (dimension < minimumDimension) return false;
+    if (dimension == currentDimension) return true;
+    if (recordUndo) checkpoint();
+
+    final shift = dimension - currentDimension;
+    switch (edge) {
+      case CanvasResizeEdge.left:
+        for (final item in objects) {
+          item.xMm += shift;
+        }
+        for (final line in lines) {
+          line.x1Mm += shift;
+          line.x2Mm += shift;
+        }
+        activeProject.canvasWidthMm = dimension;
+      case CanvasResizeEdge.right:
+        activeProject.canvasWidthMm = dimension;
+      case CanvasResizeEdge.top:
+        for (final item in objects) {
+          item.yMm += shift;
+        }
+        for (final line in lines) {
+          line.y1Mm += shift;
+          line.y2Mm += shift;
+        }
+        activeProject.canvasHeightMm = dimension;
+      case CanvasResizeEdge.bottom:
+        activeProject.canvasHeightMm = dimension;
+    }
     changed();
     return true;
   }

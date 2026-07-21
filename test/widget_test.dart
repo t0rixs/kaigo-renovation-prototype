@@ -467,6 +467,30 @@ void main() {
     state.dispose();
   });
 
+  test('図面の左上をリサイズすると配置物の見た目を保つ座標へ補正する', () {
+    final state = AppState(dataRepository: MemoryAppDataRepository());
+    state.addLayout(1000, 750, 2000, 1500);
+    state.addHandrail(1500, 2500, 3000, 2500);
+    final room = state.objects.single;
+    final line = state.lines.single;
+
+    expect(state.resizeCanvasFromEdge(CanvasResizeEdge.left, 10500), isTrue);
+    expect(state.canvasWidthMm, 10500);
+    expect(room.xMm, 1500);
+    expect(line.x1Mm, 2000);
+    expect(line.x2Mm, 3500);
+
+    expect(state.resizeCanvasFromEdge(CanvasResizeEdge.top, 8000), isTrue);
+    expect(state.canvasHeightMm, 8000);
+    expect(room.yMm, 1250);
+    expect(line.y1Mm, 3000);
+    expect(line.y2Mm, 3000);
+
+    expect(state.resizeCanvasFromEdge(CanvasResizeEdge.left, 8750), isFalse);
+    expect(state.canvasWidthMm, 10500);
+    state.dispose();
+  });
+
   test('書類データは手すり1本を1明細として粗利率から顧客単価を計算する', () {
     final state = AppState(dataRepository: MemoryAppDataRepository())
       ..addSample(notify: false);
@@ -669,6 +693,57 @@ void main() {
     state.dispose();
   });
 
+  testWidgets('図面設定では外周4辺のハンドルでサイズを変更できる', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AppState();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: state,
+            builder: (context, _) => DrawingScreen(state: state),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byKey(const ValueKey('drawing-toolbar')),
+      const Offset(-500, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('drawing-settings')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('canvas-resize-top')), findsOneWidget);
+    expect(find.byKey(const ValueKey('canvas-resize-right')), findsOneWidget);
+    expect(find.byKey(const ValueKey('canvas-resize-bottom')), findsOneWidget);
+    expect(find.byKey(const ValueKey('canvas-resize-left')), findsOneWidget);
+    final originalWidth = state.canvasWidthMm;
+    await tester.drag(
+      find.byKey(const ValueKey('canvas-resize-right')),
+      const Offset(40, 0),
+    );
+    await tester.pumpAndSettle();
+
+    expect(state.canvasWidthMm, greaterThan(originalWidth));
+    expect(state.canvasWidthMm % AppState.gridMm, 0);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('canvas-width-field')))
+          .controller!
+          .text,
+      '${state.canvasWidthMm}',
+    );
+    expect(tester.takeException(), isNull);
+    state.dispose();
+  });
+
   testWidgets('設備は親ツールからトイレを選択する', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -683,6 +758,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    final viewerRectBefore = tester.getRect(find.byType(InteractiveViewer));
+    final viewer = tester.widget<InteractiveViewer>(
+      find.byType(InteractiveViewer),
+    );
+    final transformBefore = List<double>.of(
+      viewer.transformationController!.value.storage,
+    );
     expect(find.byKey(const ValueKey('equipment-menu')), findsNothing);
     expect(find.byIcon(Icons.wc), findsNothing);
     await tester.tap(find.byKey(const ValueKey('tool-equipment')));
@@ -697,6 +779,8 @@ void main() {
     );
     expect(find.byKey(const ValueKey('equipment-menu')), findsOneWidget);
     expect(find.byKey(const ValueKey('equipment-toilet')), findsOneWidget);
+    expect(tester.getRect(find.byType(InteractiveViewer)), viewerRectBefore);
+    expect(viewer.transformationController!.value.storage, transformBefore);
     await tester.tap(find.byKey(const ValueKey('equipment-toilet')));
     await tester.pump();
     expect(find.text('トイレ：配置する中心グリッドをタップ'), findsOneWidget);

@@ -34,9 +34,17 @@ class _DrawingScreenState extends State<DrawingScreen> {
   final TransformationController transform = TransformationController();
   final GlobalKey canvasKey = GlobalKey();
   final GlobalKey viewerKey = GlobalKey();
+  late final TextEditingController canvasWidthController;
+  late final TextEditingController canvasHeightController;
   DrawingTool? tool;
   _EquipmentTool? equipmentTool;
   DoorType doorTool = DoorType.swing;
+  bool canvasSettingsActive = false;
+  CanvasResizeEdge? canvasResizeEdge;
+  Offset? canvasResizeStartGlobal;
+  int canvasResizeOriginWidthMm = 0;
+  int canvasResizeOriginHeightMm = 0;
+  bool canvasResizeChanged = false;
   Offset? draftStartMm;
   Offset? draftCurrentMm;
   int? draftPointer;
@@ -76,13 +84,27 @@ class _DrawingScreenState extends State<DrawingScreen> {
   @override
   void initState() {
     super.initState();
+    canvasWidthController = TextEditingController(
+      text: '${state.canvasWidthMm}',
+    );
+    canvasHeightController = TextEditingController(
+      text: '${state.canvasHeightMm}',
+    );
+    transform.addListener(_handleTransformChange);
     WidgetsBinding.instance.addPostFrameCallback((_) => _resetView());
   }
 
   @override
   void dispose() {
+    transform.removeListener(_handleTransformChange);
+    canvasWidthController.dispose();
+    canvasHeightController.dispose();
     transform.dispose();
     super.dispose();
+  }
+
+  void _handleTransformChange() {
+    if (mounted && canvasSettingsActive) setState(() {});
   }
 
   double _px(int mm) => mm / AppState.gridMm * pixelsPerGrid;
@@ -98,8 +120,6 @@ class _DrawingScreenState extends State<DrawingScreen> {
     return Column(
       children: [
         _toolbar(),
-        if (tool == DrawingTool.equipment) _equipmentMenu(),
-        if (tool == DrawingTool.door) _doorMenu(),
         _statusBar(),
         Expanded(
           child: LayoutBuilder(
@@ -202,8 +222,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
           key: const ValueKey('drawing-settings'),
           icon: CupertinoIcons.gear,
           label: '図面設定',
-          selected: false,
-          onTap: _showCanvasSettings,
+          selected: canvasSettingsActive,
+          onTap: _toggleCanvasSettings,
         ),
       ],
     ),
@@ -267,17 +287,19 @@ class _DrawingScreenState extends State<DrawingScreen> {
   );
 
   Widget _statusBar() {
-    final text = switch (tool) {
-      DrawingTool.layout => '間取り：空白をドラッグして長方形を作成（250mm単位）',
-      DrawingTool.rail => '手すり：空白をドラッグして縦または横に作成',
-      DrawingTool.equipment => switch (equipmentTool) {
-        _EquipmentTool.toilet => 'トイレ：配置する中心グリッドをタップ',
-        null => '配置する設備を選択',
-      },
-      DrawingTool.door => '${doorTool.label}：間取りの辺付近をタップして配置',
-      DrawingTool.window => '間取りの辺付近をタップして窓を配置',
-      null => 'ツール未選択：ドラッグで画面移動',
-    };
+    final text = canvasSettingsActive
+        ? '図面サイズ：外周ハンドルをドラッグ、または数値を入力（250mm単位）'
+        : switch (tool) {
+            DrawingTool.layout => '間取り：空白をドラッグして長方形を作成（250mm単位）',
+            DrawingTool.rail => '手すり：空白をドラッグして縦または横に作成',
+            DrawingTool.equipment => switch (equipmentTool) {
+              _EquipmentTool.toilet => 'トイレ：配置する中心グリッドをタップ',
+              null => '配置する設備を選択',
+            },
+            DrawingTool.door => '${doorTool.label}：間取りの辺付近をタップして配置',
+            DrawingTool.window => '間取りの辺付近をタップして窓を配置',
+            null => 'ツール未選択：ドラッグで画面移動',
+          };
     return Container(
       width: double.infinity,
       color: Theme.of(context).colorScheme.primaryContainer,
@@ -355,6 +377,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
                           if (state.selected is WorkLine)
                             ..._lineControls(state.selected! as WorkLine),
                           ..._selectedSharedWallButtons(),
+                          if (canvasSettingsActive) ..._canvasResizeHandles(),
                         ],
                       ),
                     ),
@@ -365,19 +388,26 @@ class _DrawingScreenState extends State<DrawingScreen> {
           ),
         ),
       ),
-      Positioned(
-        right: 10,
-        bottom: state.selected == null ? 12 : 72,
-        child: Column(
-          children: [
-            _canvasButton(CupertinoIcons.plus, '拡大', () => _zoom(.18)),
-            const SizedBox(height: 6),
-            _canvasButton(CupertinoIcons.minus, '縮小', () => _zoom(-.18)),
-            const SizedBox(height: 6),
-            _canvasButton(CupertinoIcons.scope, '全体表示', _resetView),
-          ],
+      if (tool == DrawingTool.equipment)
+        Positioned(top: 0, left: 0, right: 0, child: _equipmentMenu()),
+      if (tool == DrawingTool.door)
+        Positioned(top: 0, left: 0, right: 0, child: _doorMenu()),
+      if (canvasSettingsActive)
+        Positioned(top: 10, left: 10, right: 10, child: _canvasSizePanel()),
+      if (!canvasSettingsActive)
+        Positioned(
+          right: 10,
+          bottom: state.selected == null ? 12 : 72,
+          child: Column(
+            children: [
+              _canvasButton(CupertinoIcons.plus, '拡大', () => _zoom(.18)),
+              const SizedBox(height: 6),
+              _canvasButton(CupertinoIcons.minus, '縮小', () => _zoom(-.18)),
+              const SizedBox(height: 6),
+              _canvasButton(CupertinoIcons.scope, '全体表示', _resetView),
+            ],
+          ),
         ),
-      ),
       if (state.selected != null && MediaQuery.sizeOf(context).width < 900)
         _selectionBar(),
     ],
@@ -399,6 +429,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   void _setTool(DrawingTool value) {
     setState(() {
+      canvasSettingsActive = false;
       tool = tool == value ? null : value;
       if (tool != DrawingTool.equipment) equipmentTool = null;
       draftStartMm = null;
@@ -408,6 +439,26 @@ class _DrawingScreenState extends State<DrawingScreen> {
       multiTouchGestureActive = false;
     });
     if (state.selectedId != null) state.select(null);
+  }
+
+  void _toggleCanvasSettings() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final willOpen = !canvasSettingsActive;
+    setState(() {
+      canvasSettingsActive = willOpen;
+      tool = null;
+      equipmentTool = null;
+      draftStartMm = null;
+      draftCurrentMm = null;
+      draftPointer = null;
+      canvasPointers.clear();
+      multiTouchGestureActive = false;
+      _syncCanvasDimensionFields();
+    });
+    if (state.selectedId != null) state.select(null);
+    if (willOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _resetView());
+    }
   }
 
   void _setEquipmentTool(_EquipmentTool value) {
@@ -547,7 +598,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   }
 
   void _handleCanvasTap(TapUpDetails details) {
-    if (multiTouchGestureActive) return;
+    if (multiTouchGestureActive || canvasSettingsActive) return;
     if (state.selectedId != null) {
       state.select(null);
       return;
@@ -1909,133 +1960,276 @@ class _DrawingScreenState extends State<DrawingScreen> {
     );
   }
 
-  Future<void> _showCanvasSettings() async {
-    final width = TextEditingController(text: '${state.canvasWidthMm}');
-    final height = TextEditingController(text: '${state.canvasHeightMm}');
-    var updated = false;
-    String? error;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => ControllerDisposalScope(
-        controllers: [width, height],
-        builder: (_) => StatefulBuilder(
-          builder: (context, setSheetState) {
-            return Padding(
-              padding: EdgeInsets.fromLTRB(
-                20,
-                18,
-                20,
-                20 + MediaQuery.viewInsetsOf(context).bottom,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    '図面設定',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+  void _syncCanvasDimensionFields() {
+    canvasWidthController.text = '${state.canvasWidthMm}';
+    canvasHeightController.text = '${state.canvasHeightMm}';
+  }
+
+  Widget _canvasSizePanel() => CupertinoPopupSurface(
+    child: Material(
+      color: Colors.transparent,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '図面サイズ',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 18),
-                  _dimensionInput(
+                ),
+                Text(
+                  '250mm単位',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton.filled(
+                  key: const ValueKey('apply-canvas-settings'),
+                  tooltip: '図面サイズを反映して閉じる',
+                  onPressed: _applyCanvasDimensionFields,
+                  icon: const Icon(
+                    CupertinoIcons.check_mark,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _canvasDimensionField(
                     key: const ValueKey('canvas-width-field'),
                     label: '横幅',
-                    controller: width,
+                    controller: canvasWidthController,
+                    submit: false,
                   ),
-                  const SizedBox(height: 12),
-                  _dimensionInput(
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _canvasDimensionField(
                     key: const ValueKey('canvas-height-field'),
                     label: '縦幅',
-                    controller: height,
+                    controller: canvasHeightController,
+                    submit: true,
                   ),
-                  if (error != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      error!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  FilledButton.icon(
-                    key: const ValueKey('apply-canvas-settings'),
-                    onPressed: () {
-                      final targetWidth = math.max(
-                        AppState.gridMm,
-                        state.snapMm(parseInt(width.text)),
-                      );
-                      final targetHeight = math.max(
-                        AppState.gridMm,
-                        state.snapMm(parseInt(height.text)),
-                      );
-                      width.text = '$targetWidth';
-                      height.text = '$targetHeight';
-                      if (!state.setCanvasSize(targetWidth, targetHeight)) {
-                        setSheetState(() {
-                          error =
-                              '配置済み要素を収めるには ${state.minimumCanvasWidthMm} × '
-                              '${state.minimumCanvasHeightMm}mm 以上が必要です';
-                        });
-                        return;
-                      }
-                      updated = true;
-                      Navigator.pop(context);
-                    },
-                    icon: const Icon(Icons.check),
-                    label: const Text('反映する'),
-                  ),
-                ],
-              ),
-            );
-          },
+                ),
+              ],
+            ),
+          ],
         ),
       ),
-    );
-    if (updated && mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _resetView());
-    }
-  }
+    ),
+  );
 
-  Widget _dimensionInput({
+  Widget _canvasDimensionField({
     required Key key,
     required String label,
     required TextEditingController controller,
-  }) {
-    void step(int amount) {
-      final current = parseInt(controller.text);
-      controller.text = '${math.max(AppState.gridMm, current + amount)}';
-    }
+    required bool submit,
+  }) => TextField(
+    key: key,
+    controller: controller,
+    keyboardType: TextInputType.number,
+    textInputAction: submit ? TextInputAction.done : TextInputAction.next,
+    textAlign: TextAlign.end,
+    onSubmitted: submit ? (_) => _applyCanvasDimensionFields() : null,
+    decoration: InputDecoration(
+      isDense: true,
+      labelText: label,
+      suffixText: 'mm',
+    ),
+  );
 
-    return Row(
-      children: [
-        IconButton.outlined(
-          tooltip: '$labelを250mm小さくする',
-          onPressed: () => step(-AppState.gridMm),
-          icon: const Icon(CupertinoIcons.minus),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: TextField(
-            key: key,
-            controller: controller,
-            keyboardType: TextInputType.number,
-            textAlign: TextAlign.end,
-            decoration: InputDecoration(labelText: label, suffixText: 'mm'),
+  void _applyCanvasDimensionFields() {
+    final targetWidth = math.max(
+      AppState.gridMm,
+      state.snapMm(parseInt(canvasWidthController.text)),
+    );
+    final targetHeight = math.max(
+      AppState.gridMm,
+      state.snapMm(parseInt(canvasHeightController.text)),
+    );
+    _syncCanvasDimensionFields();
+    if (!state.setCanvasSize(targetWidth, targetHeight)) {
+      _syncCanvasDimensionFields();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '配置済み要素を収めるには ${state.minimumCanvasWidthMm} × '
+            '${state.minimumCanvasHeightMm}mm 以上が必要です',
           ),
         ),
-        const SizedBox(width: 8),
-        IconButton.outlined(
-          tooltip: '$labelを250mm大きくする',
-          onPressed: () => step(AppState.gridMm),
-          icon: const Icon(CupertinoIcons.plus),
+      );
+      return;
+    }
+    _syncCanvasDimensionFields();
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => canvasSettingsActive = false);
+  }
+
+  List<Widget> _canvasResizeHandles() => [
+    _canvasResizeHandle(CanvasResizeEdge.top),
+    _canvasResizeHandle(CanvasResizeEdge.right),
+    _canvasResizeHandle(CanvasResizeEdge.bottom),
+    _canvasResizeHandle(CanvasResizeEdge.left),
+  ];
+
+  Widget _canvasResizeHandle(CanvasResizeEdge edge) {
+    final currentScale = math.max(scale, .01);
+    final hitSize = 48.0 / currentScale;
+    final visualSize = 30.0 / currentScale;
+    final position = switch (edge) {
+      CanvasResizeEdge.top => (
+        left: canvasSize.width / 2 - hitSize / 2,
+        top: 0.0,
+      ),
+      CanvasResizeEdge.right => (
+        left: canvasSize.width - hitSize,
+        top: canvasSize.height / 2 - hitSize / 2,
+      ),
+      CanvasResizeEdge.bottom => (
+        left: canvasSize.width / 2 - hitSize / 2,
+        top: canvasSize.height - hitSize,
+      ),
+      CanvasResizeEdge.left => (
+        left: 0.0,
+        top: canvasSize.height / 2 - hitSize / 2,
+      ),
+    };
+    final icon = switch (edge) {
+      CanvasResizeEdge.top => CupertinoIcons.chevron_up,
+      CanvasResizeEdge.right => CupertinoIcons.chevron_right,
+      CanvasResizeEdge.bottom => CupertinoIcons.chevron_down,
+      CanvasResizeEdge.left => CupertinoIcons.chevron_left,
+    };
+    final label = switch (edge) {
+      CanvasResizeEdge.top => '上辺で縦幅を変更',
+      CanvasResizeEdge.right => '右辺で横幅を変更',
+      CanvasResizeEdge.bottom => '下辺で縦幅を変更',
+      CanvasResizeEdge.left => '左辺で横幅を変更',
+    };
+    return Positioned(
+      key: ValueKey('canvas-resize-${edge.name}'),
+      left: position.left,
+      top: position.top,
+      width: hitSize,
+      height: hitSize,
+      child: Semantics(
+        button: true,
+        label: label,
+        child: RawGestureDetector(
+          behavior: HitTestBehavior.opaque,
+          gestures: <Type, GestureRecognizerFactory>{
+            EagerGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<EagerGestureRecognizer>(
+                  EagerGestureRecognizer.new,
+                  (_) {},
+                ),
+          },
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: (event) => _beginCanvasResize(edge, event.position),
+            onPointerMove: (event) => _updateCanvasResize(event.position),
+            onPointerUp: (_) => _endCanvasResize(),
+            onPointerCancel: (_) => _endCanvasResize(),
+            child: Center(
+              child: Container(
+                width: visualSize,
+                height: visualSize,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.surface,
+                    width: 2 / currentScale,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: .18),
+                      blurRadius: 5 / currentScale,
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  icon,
+                  size: 17 / currentScale,
+                  color: Theme.of(context).colorScheme.onPrimary,
+                ),
+              ),
+            ),
+          ),
         ),
-      ],
+      ),
     );
+  }
+
+  void _beginCanvasResize(CanvasResizeEdge edge, Offset globalPosition) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    _suppressCanvasInteraction();
+    canvasResizeEdge = edge;
+    canvasResizeStartGlobal = globalPosition;
+    canvasResizeOriginWidthMm = state.canvasWidthMm;
+    canvasResizeOriginHeightMm = state.canvasHeightMm;
+    canvasResizeChanged = false;
+  }
+
+  void _updateCanvasResize(Offset globalPosition) {
+    final edge = canvasResizeEdge;
+    final start = canvasResizeStartGlobal;
+    if (edge == null || start == null) return;
+    final delta = (globalPosition - start) / scale;
+    final deltaX = _mm(delta.dx);
+    final deltaY = _mm(delta.dy);
+    final target = switch (edge) {
+      CanvasResizeEdge.left => canvasResizeOriginWidthMm - deltaX,
+      CanvasResizeEdge.right => canvasResizeOriginWidthMm + deltaX,
+      CanvasResizeEdge.top => canvasResizeOriginHeightMm - deltaY,
+      CanvasResizeEdge.bottom => canvasResizeOriginHeightMm + deltaY,
+    };
+    final previousWidth = state.canvasWidthMm;
+    final previousHeight = state.canvasHeightMm;
+    final resized = state.resizeCanvasFromEdge(
+      edge,
+      target,
+      recordUndo: !canvasResizeChanged,
+    );
+    if (!resized ||
+        (state.canvasWidthMm == previousWidth &&
+            state.canvasHeightMm == previousHeight)) {
+      return;
+    }
+    canvasResizeChanged = true;
+    if (edge == CanvasResizeEdge.left || edge == CanvasResizeEdge.top) {
+      final matrix = transform.value.clone();
+      final translation = matrix.getTranslation();
+      final widthDeltaPixels = _px(state.canvasWidthMm - previousWidth) * scale;
+      final heightDeltaPixels =
+          _px(state.canvasHeightMm - previousHeight) * scale;
+      matrix.setTranslationRaw(
+        translation.x - widthDeltaPixels,
+        translation.y - heightDeltaPixels,
+        0,
+      );
+      transform.value = matrix;
+    }
+    _syncCanvasDimensionFields();
+    setState(() {});
+  }
+
+  void _endCanvasResize() {
+    canvasResizeEdge = null;
+    canvasResizeStartGlobal = null;
+    canvasResizeChanged = false;
+    _syncCanvasDimensionFields();
+    _releaseCanvasInteraction();
   }
 
   Widget _canvasButton(IconData icon, String tooltip, VoidCallback onPressed) =>
@@ -2072,12 +2266,13 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (!mounted) return;
     final viewport =
         (viewerKey.currentContext?.findRenderObject() as RenderBox?)?.size;
+    final visiblePadding = canvasSettingsActive ? 72.0 : 24.0;
     final fit = viewport == null
         ? .5
         : math
               .min(
-                (viewport.width - 24) / canvasSize.width,
-                (viewport.height - 24) / canvasSize.height,
+                (viewport.width - visiblePadding) / canvasSize.width,
+                (viewport.height - visiblePadding) / canvasSize.height,
               )
               .clamp(minimumScale, .75);
     final translationX = viewport == null
