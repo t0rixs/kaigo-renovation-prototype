@@ -61,7 +61,13 @@ class _DrawingScreenState extends State<DrawingScreen> {
   bool lineChanged = false;
 
   AppState get state => widget.state;
-  double get scale => transform.value.getMaxScaleOnAxis();
+  double get scale {
+    final matrix = transform.value;
+    final scaleX = matrix.entry(0, 0);
+    final scaleY = matrix.entry(1, 0);
+    return math.sqrt(scaleX * scaleX + scaleY * scaleY);
+  }
+
   Color get selectionColor => editorSelectionColor;
   Size get canvasSize =>
       Size(_px(state.canvasWidthMm), _px(state.canvasHeightMm));

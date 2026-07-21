@@ -1000,6 +1000,46 @@ void main() {
     state.dispose();
   });
 
+  testWidgets('拡大縮小ボタンは画面中央の図面座標を維持する', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AppState()..addSample(notify: false);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: DrawingScreen(state: state)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final viewerFinder = find.byType(InteractiveViewer);
+    final viewer = tester.widget<InteractiveViewer>(viewerFinder);
+    final controller = viewer.transformationController!;
+    await tester.drag(viewerFinder, const Offset(-90, -60));
+    await tester.pumpAndSettle();
+
+    final viewportCenter = tester.getSize(viewerFinder).center(Offset.zero);
+    final scaleBefore = controller.value.entry(0, 0);
+    final beforeZoomIn = controller.toScene(viewportCenter);
+    await tester.tap(find.byTooltip('拡大'));
+    await tester.pump();
+    final afterZoomIn = controller.toScene(viewportCenter);
+    expect(controller.value.entry(0, 0), closeTo(scaleBefore + .18, .001));
+    expect(afterZoomIn.dx, closeTo(beforeZoomIn.dx, .001));
+    expect(afterZoomIn.dy, closeTo(beforeZoomIn.dy, .001));
+
+    await tester.tap(find.byTooltip('縮小'));
+    await tester.pump();
+    final afterZoomOut = controller.toScene(viewportCenter);
+    expect(controller.value.entry(0, 0), closeTo(scaleBefore, .001));
+    expect(afterZoomOut.dx, closeTo(beforeZoomIn.dx, .001));
+    expect(afterZoomOut.dy, closeTo(beforeZoomIn.dy, .001));
+    expect(tester.takeException(), isNull);
+    state.dispose();
+  });
+
   testWidgets('任意の図面要素は空白のワンタップで選択解除される', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -1620,11 +1660,6 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    for (var i = 0; i < 12; i++) {
-      await tester.tap(find.byTooltip('拡大'));
-      await tester.pump();
-    }
-
     final endHandle = find.byKey(ValueKey('line-${line.id}-end'));
     final gesture = await tester.startGesture(tester.getCenter(endHandle));
     await gesture.moveBy(const Offset(0, 120));
@@ -1661,11 +1696,6 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-
-    for (var i = 0; i < 12; i++) {
-      await tester.tap(find.byTooltip('拡大'));
-      await tester.pump();
-    }
 
     final handle = find.byKey(ValueKey('resize-${toilet.id}'));
     final drawingState = tester.state(find.byType(DrawingScreen)) as dynamic;
