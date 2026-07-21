@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
@@ -12,95 +13,99 @@ class ProductsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showProductForm(context),
-        icon: const Icon(Icons.add),
-        label: const Text('商品を追加'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 18, 16, 96),
-        children: [
-          Text(
-            'デフォルト品番',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final wide = constraints.maxWidth >= 620;
-                  final selectors = [
-                    _DefaultProductSelector(
-                      state: state,
-                      environment: HandrailEnvironment.indoor,
-                    ),
-                    _DefaultProductSelector(
-                      state: state,
-                      environment: HandrailEnvironment.outdoor,
-                    ),
-                  ];
-                  if (wide) {
-                    return Row(
-                      children: [
-                        Expanded(child: selectors[0]),
-                        const SizedBox(width: 12),
-                        Expanded(child: selectors[1]),
-                      ],
-                    );
-                  }
-                  return Column(
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 36),
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'デフォルト品番',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            FilledButton.tonalIcon(
+              key: const ValueKey('add-product'),
+              onPressed: () => _showProductForm(context),
+              icon: const Icon(CupertinoIcons.add),
+              label: const Text('商品を追加'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final wide = constraints.maxWidth >= 620;
+                final selectors = [
+                  _DefaultProductSelector(
+                    state: state,
+                    environment: HandrailEnvironment.indoor,
+                  ),
+                  _DefaultProductSelector(
+                    state: state,
+                    environment: HandrailEnvironment.outdoor,
+                  ),
+                ];
+                if (wide) {
+                  return Row(
                     children: [
-                      selectors[0],
-                      const SizedBox(height: 12),
-                      selectors[1],
+                      Expanded(child: selectors[0]),
+                      const SizedBox(width: 12),
+                      Expanded(child: selectors[1]),
                     ],
                   );
-                },
+                }
+                return Column(
+                  children: [
+                    selectors[0],
+                    const SizedBox(height: 12),
+                    selectors[1],
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 22),
+        Text(
+          '手すり商品 ${state.products.length}件',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '手すり本体・ジョイント・柱の材料単価を管理します',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (state.products.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: Text('商品が登録されていません')),
+            ),
+          )
+        else
+          ...state.products.map(
+            (product) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _ProductCard(
+                state: state,
+                product: product,
+                onEdit: () => _showProductForm(context, product: product),
+                onDelete: () => _confirmDelete(context, product),
               ),
             ),
           ),
-          const SizedBox(height: 22),
-          Text(
-            '手すり商品 ${state.products.length}件',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '手すり本体・ジョイント・柱の材料単価を管理します',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: Colors.black54),
-          ),
-          const SizedBox(height: 12),
-          if (state.products.isEmpty)
-            const Card(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: Text('商品が登録されていません')),
-              ),
-            )
-          else
-            ...state.products.map(
-              (product) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _ProductCard(
-                  state: state,
-                  product: product,
-                  onEdit: () => _showProductForm(context, product: product),
-                  onDelete: () => _confirmDelete(context, product),
-                ),
-              ),
-            ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -108,17 +113,18 @@ class ProductsScreen extends StatelessWidget {
     BuildContext context,
     HandrailProduct product,
   ) async {
-    final result = await showDialog<bool>(
+    final result = await showCupertinoDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => CupertinoAlertDialog(
         title: const Text('商品を削除'),
         content: Text('${product.id} ${product.name}を削除しますか？'),
         actions: [
-          TextButton(
+          CupertinoDialogAction(
             onPressed: () => Navigator.pop(context, false),
             child: const Text('キャンセル'),
           ),
-          FilledButton(
+          CupertinoDialogAction(
+            isDestructiveAction: true,
             onPressed: () => Navigator.pop(context, true),
             child: const Text('削除'),
           ),
@@ -278,7 +284,11 @@ class ProductsScreen extends StatelessWidget {
                       }
                       Navigator.pop(sheetContext);
                     },
-                    icon: Icon(product == null ? Icons.add : Icons.check),
+                    icon: Icon(
+                      product == null
+                          ? CupertinoIcons.add
+                          : CupertinoIcons.check_mark,
+                    ),
                     label: Text(product == null ? '追加する' : '変更を保存'),
                   ),
                 ],
@@ -353,14 +363,13 @@ class _ProductCard extends StatelessWidget {
               height: 46,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: const Color(0xFFE5F1FA),
+                color: Theme.of(context).colorScheme.primaryContainer,
                 borderRadius: BorderRadius.circular(7),
               ),
               child: Text(
                 'φ${product.diameterMm}',
-                style: const TextStyle(
-                  color: Color(0xFF1769AA),
-                  fontSize: 12,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -393,12 +402,12 @@ class _ProductCard extends StatelessWidget {
             ),
             IconButton(
               tooltip: '編集',
-              icon: const Icon(Icons.edit_outlined),
+              icon: const Icon(CupertinoIcons.pencil),
               onPressed: onEdit,
             ),
             IconButton(
               tooltip: state.isProductInUse(product) ? '図面で使用中です' : '削除',
-              icon: const Icon(Icons.delete_outline),
+              icon: const Icon(CupertinoIcons.trash),
               onPressed: state.isProductInUse(product) ? null : onDelete,
             ),
           ],

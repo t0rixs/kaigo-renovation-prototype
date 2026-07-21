@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
@@ -47,51 +48,18 @@ class _AppShellState extends State<AppShell> {
           }
         },
         child: Scaffold(
-          appBar: AppBar(
-            leading: BackButton(onPressed: _handleBack),
-            titleSpacing: 8,
-            toolbarHeight: 64,
-            title: Row(
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary,
-                    borderRadius: BorderRadius.circular(7),
-                  ),
-                  child: const Text(
-                    '改',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(titles[index], overflow: TextOverflow.ellipsis),
-                      Text(
-                        widget.state.customer.projectName.trim().isEmpty
-                            ? '工事名未設定'
-                            : widget.state.customer.projectName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: Colors.black54,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+          appBar: CupertinoNavigationBar(
+            automaticallyImplyLeading: false,
+            leading: Tooltip(
+              message: index == drawingIndex ? '案件一覧へ戻る' : '図面へ戻る',
+              child: CupertinoButton(
+                key: const ValueKey('project-back-button'),
+                padding: EdgeInsets.zero,
+                onPressed: _handleBack,
+                child: const Icon(CupertinoIcons.chevron_left),
+              ),
             ),
+            middle: Text(titles[index], overflow: TextOverflow.ellipsis),
           ),
           body: IndexedStack(
             index: index,
@@ -102,31 +70,32 @@ class _AppShellState extends State<AppShell> {
               DocumentsScreen(state: widget.state, onOpenDrawing: _openDrawing),
             ],
           ),
-          bottomNavigationBar: NavigationBar(
-            selectedIndex: index,
-            onDestinationSelected: (value) {
+          bottomNavigationBar: CupertinoTabBar(
+            key: const ValueKey('project-tab-bar'),
+            currentIndex: index,
+            onTap: (value) {
               FocusManager.instance.primaryFocus?.unfocus();
               setState(() => index = value);
             },
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.badge_outlined),
-                selectedIcon: Icon(Icons.badge),
+            items: const [
+              BottomNavigationBarItem(
+                icon: Icon(CupertinoIcons.person_crop_rectangle),
+                activeIcon: Icon(CupertinoIcons.person_crop_rectangle_fill),
                 label: '基本情報',
               ),
-              NavigationDestination(
-                icon: Icon(Icons.inventory_2_outlined),
-                selectedIcon: Icon(Icons.inventory_2),
+              BottomNavigationBarItem(
+                icon: Icon(CupertinoIcons.cube_box),
+                activeIcon: Icon(CupertinoIcons.cube_box_fill),
                 label: '品番',
               ),
-              NavigationDestination(
-                icon: Icon(Icons.architecture_outlined),
-                selectedIcon: Icon(Icons.architecture),
+              BottomNavigationBarItem(
+                icon: Icon(CupertinoIcons.square_grid_2x2),
+                activeIcon: Icon(CupertinoIcons.square_grid_2x2_fill),
                 label: '図面',
               ),
-              NavigationDestination(
-                icon: Icon(Icons.request_quote_outlined),
-                selectedIcon: Icon(Icons.request_quote),
+              BottomNavigationBarItem(
+                icon: Icon(CupertinoIcons.doc_text),
+                activeIcon: Icon(CupertinoIcons.doc_text_fill),
                 label: '書類',
               ),
             ],

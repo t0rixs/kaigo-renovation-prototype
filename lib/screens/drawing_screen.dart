@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
@@ -120,11 +121,18 @@ class _DrawingScreenState extends State<DrawingScreen> {
     );
   }
 
+  double _toolBarHeight(double base) {
+    final scaledLabel = MediaQuery.textScalerOf(context).scale(11);
+    return (base + math.max(0, scaledLabel - 11) * 2).clamp(base, 94);
+  }
+
   Widget _toolbar() => Container(
-    height: 68,
-    decoration: const BoxDecoration(
-      color: Colors.white,
-      border: Border(bottom: BorderSide(color: Color(0xFFD9DEE3))),
+    height: _toolBarHeight(68),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surface,
+      border: Border(
+        bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
     ),
     child: ListView(
       key: const ValueKey('drawing-toolbar'),
@@ -133,22 +141,22 @@ class _DrawingScreenState extends State<DrawingScreen> {
       children: [
         _ToolButton(
           key: const ValueKey('tool-layout'),
-          icon: Icons.crop_square,
+          icon: CupertinoIcons.square,
           label: '間取り',
           selected: tool == DrawingTool.layout,
           onTap: () => _setTool(DrawingTool.layout),
         ),
         _ToolButton(
           key: const ValueKey('tool-rail'),
-          icon: Icons.horizontal_rule,
+          icon: CupertinoIcons.minus,
           label: '手すり',
           selected: tool == DrawingTool.rail,
-          color: const Color(0xFFC9372C),
+          color: Theme.of(context).colorScheme.error,
           onTap: () => _setTool(DrawingTool.rail),
         ),
         _ToolButton(
           key: const ValueKey('tool-equipment'),
-          icon: Icons.widgets_outlined,
+          icon: CupertinoIcons.square_grid_2x2,
           label: '設備',
           selected: tool == DrawingTool.equipment,
           onTap: () => _setTool(DrawingTool.equipment),
@@ -169,30 +177,30 @@ class _DrawingScreenState extends State<DrawingScreen> {
         ),
         const VerticalDivider(width: 12, indent: 4, endIndent: 4),
         _ToolButton(
-          icon: Icons.undo,
+          icon: CupertinoIcons.arrow_uturn_left,
           label: '元に戻す',
           selected: false,
           enabled: state.canUndo,
           onTap: state.undo,
         ),
         _ToolButton(
-          icon: Icons.redo,
+          icon: CupertinoIcons.arrow_uturn_right,
           label: 'やり直し',
           selected: false,
           enabled: state.canRedo,
           onTap: state.redo,
         ),
         _ToolButton(
-          icon: Icons.delete_outline,
+          icon: CupertinoIcons.trash,
           label: '削除',
           selected: false,
           enabled: state.selected != null,
-          color: const Color(0xFFC9372C),
+          color: Theme.of(context).colorScheme.error,
           onTap: state.deleteSelected,
         ),
         _ToolButton(
           key: const ValueKey('drawing-settings'),
-          icon: Icons.aspect_ratio_outlined,
+          icon: CupertinoIcons.gear,
           label: '図面設定',
           selected: false,
           onTap: _showCanvasSettings,
@@ -203,10 +211,12 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   Widget _equipmentMenu() => Container(
     key: const ValueKey('equipment-menu'),
-    height: 60,
-    decoration: const BoxDecoration(
-      color: Color(0xFFF5F7F8),
-      border: Border(bottom: BorderSide(color: Color(0xFFD9DEE3))),
+    height: _toolBarHeight(60),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+      border: Border(
+        bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
     ),
     child: ListView(
       scrollDirection: Axis.horizontal,
@@ -227,10 +237,12 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   Widget _doorMenu() => Container(
     key: const ValueKey('door-menu'),
-    height: 60,
-    decoration: const BoxDecoration(
-      color: Color(0xFFF5F7F8),
-      border: Border(bottom: BorderSide(color: Color(0xFFD9DEE3))),
+    height: _toolBarHeight(60),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+      border: Border(
+        bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
     ),
     child: ListView(
       scrollDirection: Axis.horizontal,
@@ -268,15 +280,14 @@ class _DrawingScreenState extends State<DrawingScreen> {
     };
     return Container(
       width: double.infinity,
-      color: const Color(0xFFDDEEFF),
+      color: Theme.of(context).colorScheme.primaryContainer,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Text(
         text,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          color: Color(0xFF12568C),
-          fontSize: 12,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: Theme.of(context).colorScheme.onPrimaryContainer,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -287,7 +298,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     children: [
       Positioned.fill(
         child: ColoredBox(
-          color: const Color(0xFFE8EBEE),
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
           child: InteractiveViewer(
             key: viewerKey,
             transformationController: transform,
@@ -359,11 +370,11 @@ class _DrawingScreenState extends State<DrawingScreen> {
         bottom: state.selected == null ? 12 : 72,
         child: Column(
           children: [
-            _canvasButton(Icons.add, '拡大', () => _zoom(.18)),
+            _canvasButton(CupertinoIcons.plus, '拡大', () => _zoom(.18)),
             const SizedBox(height: 6),
-            _canvasButton(Icons.remove, '縮小', () => _zoom(-.18)),
+            _canvasButton(CupertinoIcons.minus, '縮小', () => _zoom(-.18)),
             const SizedBox(height: 6),
-            _canvasButton(Icons.center_focus_strong, '全体表示', _resetView),
+            _canvasButton(CupertinoIcons.scope, '全体表示', _resetView),
           ],
         ),
       ),
@@ -1450,70 +1461,61 @@ class _DrawingScreenState extends State<DrawingScreen> {
       left: 10,
       right: 10,
       bottom: 10,
-      child: Material(
-        elevation: 3,
-        color: const Color(0xFF20262C),
-        borderRadius: BorderRadius.circular(8),
+      child: CupertinoPopupSurface(
         child: SizedBox(
           height: 54,
-          child: Row(
-            children: [
-              const SizedBox(width: 14),
-              Expanded(
-                child: Text(
-                  _selectedLabel(selected),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
+          child: Material(
+            color: Colors.transparent,
+            child: Row(
+              children: [
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    _selectedLabel(selected),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-              ),
-              if (selected is PlanObject &&
-                  selected.kind == PlanObjectKind.door &&
-                  selected.doorType == DoorType.swing)
-                IconButton(
-                  tooltip: selected.opensOutward ? '内開きに変更' : '外開きに変更',
-                  color: Colors.white,
-                  onPressed: () => state.toggleDoorOpeningSide(selected),
-                  icon: const Icon(Icons.compare_arrows),
-                ),
-              if (selected is PlanObject &&
-                  selected.kind == PlanObjectKind.door)
-                IconButton(
-                  tooltip: selected.doorType == DoorType.swing
-                      ? 'ドアを左右反転'
-                      : '引き方向を反転',
-                  color: Colors.white,
-                  onPressed: () => state.flipDoor(selected),
-                  icon: Icon(
-                    selected.doorType == DoorType.swing
-                        ? Icons.flip
-                        : Icons.swap_horiz,
+                if (selected is PlanObject &&
+                    selected.kind == PlanObjectKind.door &&
+                    selected.doorType == DoorType.swing)
+                  IconButton(
+                    tooltip: selected.opensOutward ? '内開きに変更' : '外開きに変更',
+                    onPressed: () => state.toggleDoorOpeningSide(selected),
+                    icon: const Icon(CupertinoIcons.arrow_2_squarepath),
                   ),
-                ),
-              if (selected is PlanObject && selected.fixture == 'toilet')
+                if (selected is PlanObject &&
+                    selected.kind == PlanObjectKind.door)
+                  IconButton(
+                    tooltip: selected.doorType == DoorType.swing
+                        ? 'ドアを左右反転'
+                        : '引き方向を反転',
+                    onPressed: () => state.flipDoor(selected),
+                    icon: const Icon(CupertinoIcons.arrow_left_right),
+                  ),
+                if (selected is PlanObject && selected.fixture == 'toilet')
+                  IconButton(
+                    tooltip: 'トイレを90度回転',
+                    onPressed: () => state.rotateToilet(selected),
+                    icon: const Icon(CupertinoIcons.rotate_right),
+                  ),
                 IconButton(
-                  tooltip: 'トイレを90度回転',
-                  color: Colors.white,
-                  onPressed: () => state.rotateToilet(selected),
-                  icon: const Icon(Icons.rotate_right),
+                  tooltip: '属性を編集',
+                  onPressed: _editSelected,
+                  icon: const Icon(CupertinoIcons.slider_horizontal_3),
                 ),
-              IconButton(
-                tooltip: '属性を編集',
-                color: Colors.white,
-                onPressed: _editSelected,
-                icon: const Icon(Icons.tune),
-              ),
-              IconButton(
-                tooltip: '削除',
-                color: const Color(0xFFFFAAA3),
-                onPressed: state.deleteSelected,
-                icon: const Icon(Icons.delete_outline),
-              ),
-              const SizedBox(width: 4),
-            ],
+                IconButton(
+                  tooltip: '削除',
+                  color: Theme.of(context).colorScheme.error,
+                  onPressed: state.deleteSelected,
+                  icon: const Icon(CupertinoIcons.trash),
+                ),
+                const SizedBox(width: 4),
+              ],
+            ),
           ),
         ),
       ),
@@ -1567,7 +1569,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   Widget _propertiesPanel() {
     final selected = state.selected;
     return Material(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -1579,9 +1581,11 @@ class _DrawingScreenState extends State<DrawingScreen> {
           ),
           const SizedBox(height: 12),
           if (selected == null)
-            const Text(
+            Text(
               '図面上のオブジェクトを選択してください',
-              style: TextStyle(color: Colors.black54),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             )
           else ...[
             Text(
@@ -2012,7 +2016,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
         IconButton.outlined(
           tooltip: '$labelを250mm小さくする',
           onPressed: () => step(-AppState.gridMm),
-          icon: const Icon(Icons.remove),
+          icon: const Icon(CupertinoIcons.minus),
         ),
         const SizedBox(width: 8),
         Expanded(
@@ -2028,7 +2032,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
         IconButton.outlined(
           tooltip: '$labelを250mm大きくする',
           onPressed: () => step(AppState.gridMm),
-          icon: const Icon(Icons.add),
+          icon: const Icon(CupertinoIcons.plus),
         ),
       ],
     );
@@ -2036,10 +2040,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   Widget _canvasButton(IconData icon, String tooltip, VoidCallback onPressed) =>
       Material(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: Color(0xFFCDD4DA)),
+          side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         child: IconButton(
           tooltip: tooltip,
@@ -2111,49 +2115,60 @@ class _ToolButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final foreground = color ?? Theme.of(context).colorScheme.primary;
+    final scheme = Theme.of(context).colorScheme;
+    final scaledLabel = MediaQuery.textScalerOf(context).scale(11);
+    final extraWidth = math.max(0, scaledLabel - 11) * 4;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Tooltip(
-        message: label,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(7),
-          onTap: enabled ? onTap : null,
-          child: Opacity(
-            opacity: enabled ? 1 : .35,
-            child: Container(
-              width: 62,
-              decoration: BoxDecoration(
-                color: selected
-                    ? foreground.withValues(alpha: .11)
-                    : Colors.transparent,
-                border: Border.all(
-                  color: selected ? foreground : Colors.transparent,
-                ),
-                borderRadius: BorderRadius.circular(7),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  iconWidget ??
-                      Icon(
-                        icon,
-                        size: 22,
-                        color: selected || color != null
-                            ? foreground
-                            : const Color(0xFF4D5963),
-                      ),
-                  const SizedBox(height: 2),
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                      color: selected ? foreground : const Color(0xFF4D5963),
-                    ),
+      child: Semantics(
+        button: true,
+        selected: selected,
+        enabled: enabled,
+        label: label,
+        child: Tooltip(
+          message: label,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(7),
+            onTap: enabled ? onTap : null,
+            child: Opacity(
+              opacity: enabled ? 1 : .35,
+              child: Container(
+                width: (66 + extraWidth).toDouble(),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? foreground.withValues(alpha: .12)
+                      : Colors.transparent,
+                  border: Border.all(
+                    width: selected ? 1.5 : 1,
+                    color: selected ? foreground : Colors.transparent,
                   ),
-                ],
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    iconWidget ??
+                        Icon(
+                          icon,
+                          size: 22,
+                          color: selected || color != null
+                              ? foreground
+                              : scheme.onSurfaceVariant,
+                        ),
+                    const SizedBox(height: 2),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        fontWeight: selected
+                            ? FontWeight.w800
+                            : FontWeight.w600,
+                        color: selected ? foreground : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

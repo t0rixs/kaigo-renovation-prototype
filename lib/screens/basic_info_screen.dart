@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
@@ -63,9 +64,9 @@ class _BasicInfoScreenState extends State<BasicInfoScreen> {
             const SizedBox(height: 4),
             Text(
               '見積書と工事情報に反映されます',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: Colors.black54),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 20),
             Wrap(
@@ -186,15 +187,13 @@ class _BasicInfoScreenState extends State<BasicInfoScreen> {
         readOnly: true,
         decoration: InputDecoration(
           labelText: label,
-          suffixIcon: const Icon(Icons.calendar_today_outlined),
+          suffixIcon: const Icon(CupertinoIcons.calendar),
         ),
         onTap: () async {
           final current = DateTime.tryParse(controllers[key]!.text);
-          final selected = await showDatePicker(
+          final selected = await _showDatePicker(
             context: context,
             initialDate: current ?? DateTime.now(),
-            firstDate: DateTime(1900),
-            lastDate: DateTime(2100),
           );
           if (selected == null) return;
           final value =
@@ -203,6 +202,55 @@ class _BasicInfoScreenState extends State<BasicInfoScreen> {
           setter(value);
           widget.state.changed();
         },
+      ),
+    );
+  }
+
+  Future<DateTime?> _showDatePicker({
+    required BuildContext context,
+    required DateTime initialDate,
+  }) {
+    var selected = initialDate;
+    return showCupertinoModalPopup<DateTime>(
+      context: context,
+      builder: (popupContext) => Material(
+        color: CupertinoColors.systemBackground.resolveFrom(popupContext),
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 330,
+            child: Column(
+              children: [
+                SizedBox(
+                  height: 50,
+                  child: Row(
+                    children: [
+                      CupertinoButton(
+                        onPressed: () => Navigator.pop(popupContext),
+                        child: const Text('キャンセル'),
+                      ),
+                      const Spacer(),
+                      CupertinoButton(
+                        onPressed: () => Navigator.pop(popupContext, selected),
+                        child: const Text('完了'),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: CupertinoDatePicker(
+                    mode: CupertinoDatePickerMode.date,
+                    initialDateTime: initialDate,
+                    minimumDate: DateTime(1900),
+                    maximumDate: DateTime(2100),
+                    onDateTimeChanged: (value) => selected = value,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

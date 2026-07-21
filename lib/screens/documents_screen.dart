@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -69,14 +70,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           state.customer.projectName.trim().isEmpty
               ? '工事名未設定'
               : state.customer.projectName,
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: Colors.black54),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 16),
         _DocumentLink(
           key: const ValueKey('document-cost'),
-          icon: Icons.receipt_long_outlined,
+          icon: CupertinoIcons.money_yen_circle,
           title: '原価',
           subtitle:
               '材料原価 ${state.handrailEstimateGroups().length}件  合計 ${formatYen(data.materialTotal)}',
@@ -85,7 +86,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         const SizedBox(height: 10),
         _DocumentLink(
           key: const ValueKey('document-quote'),
-          icon: Icons.request_quote_outlined,
+          icon: CupertinoIcons.doc_text,
           title: '見積書',
           subtitle:
               '粗利 ${_formatMargin(data.grossMarginPercent)}%  ${formatYen(data.quoteTotal)}',
@@ -100,7 +101,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   dimension: 20,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Icon(Icons.download_outlined),
+              : const Icon(CupertinoIcons.arrow_down_doc),
           label: Text(exporting ? '作成中' : 'Excelをエクスポート'),
         ),
       ],
@@ -110,14 +111,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   Future<void> _openDocument(_DocumentPage page) async {
     FocusManager.instance.primaryFocus?.unfocus();
     final openDrawing = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
+      CupertinoPageRoute(
         builder: (routeContext) => AnimatedBuilder(
           animation: state,
           builder: (context, _) {
             final data = DocumentExportData.fromState(state);
             return Scaffold(
               key: ValueKey('document-fullscreen-${page.name}'),
-              appBar: AppBar(title: Text(_pageTitle(page))),
+              appBar: CupertinoNavigationBar(middle: Text(_pageTitle(page))),
               body: SafeArea(
                 child: ListView(
                   keyboardDismissBehavior:
@@ -193,7 +194,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 title: '原価内訳書プレビュー',
                 table: _detailPreviewTable(data.lines, customer: false),
               ),
-              icon: const Icon(Icons.table_rows_outlined),
+              icon: const Icon(CupertinoIcons.table),
               label: const Text('内訳書プレビュー'),
             ),
             OutlinedButton.icon(
@@ -202,7 +203,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 title: '原価プレビュー',
                 table: _costPreviewTable(data),
               ),
-              icon: const Icon(Icons.preview_outlined),
+              icon: const Icon(CupertinoIcons.eye),
               label: const Text('原価プレビュー'),
             ),
           ],
@@ -213,7 +214,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   Future<void> _openHandrailDocumentEditor(HandrailEstimateGroup group) async {
     await Navigator.of(context).push<void>(
-      MaterialPageRoute(
+      CupertinoPageRoute(
         builder: (_) => _HandrailDocumentEditor(state: state, group: group),
       ),
     );
@@ -359,7 +360,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   IconButton(
                     tooltip: '閉じる',
                     onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
+                    icon: const Icon(CupertinoIcons.xmark),
                   ),
                 ],
               ),
@@ -462,7 +463,7 @@ class _HandrailDocumentEditorState extends State<_HandrailDocumentEditor> {
     final line = group.primary;
     return Scaffold(
       key: const ValueKey('document-handrail-editor'),
-      appBar: AppBar(title: const Text('原価内訳を編集')),
+      appBar: const CupertinoNavigationBar(middle: Text('原価内訳を編集')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 18, 16, 36),
@@ -477,7 +478,9 @@ class _HandrailDocumentEditorState extends State<_HandrailDocumentEditor> {
             Text(
               '${group.lengthMm}mm / ${line.environment.label} / '
               '${line.installationType.label}',
-              style: const TextStyle(color: Colors.black54),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 18),
             TextField(
@@ -538,7 +541,7 @@ class _HandrailDocumentEditorState extends State<_HandrailDocumentEditor> {
             FilledButton.icon(
               key: const ValueKey('save-document-handrail'),
               onPressed: productId == null ? null : _save,
-              icon: const Icon(Icons.check),
+              icon: const Icon(CupertinoIcons.check_mark),
               label: const Text('反映する'),
             ),
           ],
@@ -582,9 +585,9 @@ class _DocumentLink extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-    color: Colors.white,
+    color: Theme.of(context).colorScheme.surface,
     shape: RoundedRectangleBorder(
-      side: const BorderSide(color: Color(0xFFDCE1E5)),
+      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
       borderRadius: BorderRadius.circular(8),
     ),
     clipBehavior: Clip.antiAlias,
@@ -593,7 +596,7 @@ class _DocumentLink extends StatelessWidget {
       leading: Icon(icon, size: 26),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
       subtitle: Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: const Icon(CupertinoIcons.chevron_forward),
       onTap: onTap,
     ),
   );
@@ -648,7 +651,9 @@ class _AmountBanner extends StatelessWidget {
         ),
         Text(
           formatYen(value),
-          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+          style: Theme.of(
+            context,
+          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
         ),
       ],
     ),
@@ -665,8 +670,12 @@ class _SpreadsheetTable extends StatelessWidget {
   Widget build(BuildContext context) => SingleChildScrollView(
     scrollDirection: Axis.horizontal,
     child: DataTable(
-      headingRowColor: const WidgetStatePropertyAll(Color(0xFFE8EEF3)),
-      border: TableBorder.all(color: const Color(0xFFB7C0C8)),
+      headingRowColor: WidgetStatePropertyAll(
+        Theme.of(context).colorScheme.surfaceContainerHighest,
+      ),
+      border: TableBorder.all(
+        color: Theme.of(context).colorScheme.outlineVariant,
+      ),
       columns: columns.map((label) => DataColumn(label: Text(label))).toList(),
       rows: rows
           .map(

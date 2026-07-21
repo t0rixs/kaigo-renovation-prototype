@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
@@ -20,7 +21,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openProject(BuildContext context, RenovationProject project) {
     widget.state.selectProject(project.id);
     Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => AppShell(state: widget.state)),
+      CupertinoPageRoute<void>(builder: (_) => AppShell(state: widget.state)),
     );
   }
 
@@ -29,39 +30,58 @@ class _HomeScreenState extends State<HomeScreen> {
     return AnimatedBuilder(
       animation: widget.state,
       builder: (context, _) => Scaffold(
-        appBar: AppBar(title: const Text('住宅改修')),
-        floatingActionButton: index == 0
-            ? FloatingActionButton.extended(
-                heroTag: 'add-project',
-                onPressed: () =>
-                    _openProject(context, widget.state.createProject()),
-                icon: const Icon(Icons.add),
-                label: const Text('案件を追加'),
-              )
-            : null,
+        appBar: CupertinoNavigationBar(
+          automaticallyImplyLeading: false,
+          middle: const Text('住宅改修'),
+          trailing: index == 0
+              ? Tooltip(
+                  message: '案件を追加',
+                  child: CupertinoButton(
+                    key: const ValueKey('add-project'),
+                    padding: EdgeInsets.zero,
+                    onPressed: () =>
+                        _openProject(context, widget.state.createProject()),
+                    child: const Icon(CupertinoIcons.add),
+                  ),
+                )
+              : null,
+        ),
         body: Column(
           children: [
-            NavigationBar(
-              key: const ValueKey('top-navigation'),
-              selectedIndex: index,
-              onDestinationSelected: (value) {
-                FocusManager.instance.primaryFocus?.unfocus();
-                setState(() => index = value);
-              },
-              destinations: const [
-                NavigationDestination(
-                  key: ValueKey('top-menu-projects'),
-                  icon: Icon(Icons.folder_copy_outlined),
-                  selectedIcon: Icon(Icons.folder_copy),
-                  label: '案件',
+            Material(
+              color: Theme.of(context).colorScheme.surface,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: CupertinoSlidingSegmentedControl<int>(
+                        key: const ValueKey('top-navigation'),
+                        groupValue: index,
+                        children: const {
+                          0: Padding(
+                            key: ValueKey('top-menu-projects'),
+                            padding: EdgeInsets.symmetric(vertical: 7),
+                            child: Text('案件'),
+                          ),
+                          1: Padding(
+                            key: ValueKey('top-menu-products'),
+                            padding: EdgeInsets.symmetric(vertical: 7),
+                            child: Text('商品マスター'),
+                          ),
+                        },
+                        onValueChanged: (value) {
+                          if (value == null) return;
+                          FocusManager.instance.primaryFocus?.unfocus();
+                          setState(() => index = value);
+                        },
+                      ),
+                    ),
+                  ),
                 ),
-                NavigationDestination(
-                  key: ValueKey('top-menu-products'),
-                  icon: Icon(Icons.inventory_2_outlined),
-                  selectedIcon: Icon(Icons.inventory_2),
-                  label: '商品マスター',
-                ),
-              ],
+              ),
             ),
             const Divider(height: 1),
             Expanded(
@@ -153,15 +173,12 @@ class _ProjectCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 14),
-                    _ProjectDetail(icon: Icons.person_outline, label: name),
+                    _ProjectDetail(icon: CupertinoIcons.person, label: name),
+                    const SizedBox(height: 8),
+                    _ProjectDetail(icon: CupertinoIcons.location, label: place),
                     const SizedBox(height: 8),
                     _ProjectDetail(
-                      icon: Icons.location_on_outlined,
-                      label: place,
-                    ),
-                    const SizedBox(height: 8),
-                    _ProjectDetail(
-                      icon: Icons.schedule,
+                      icon: CupertinoIcons.time,
                       label: '最終更新 ${_formatDateTime(project.updatedAt)}',
                     ),
                   ],
@@ -170,7 +187,7 @@ class _ProjectCard extends StatelessWidget {
               const SizedBox(width: 8),
               const Padding(
                 padding: EdgeInsets.only(top: 2),
-                child: Icon(Icons.chevron_right),
+                child: Icon(CupertinoIcons.chevron_forward),
               ),
             ],
           ),
@@ -191,15 +208,14 @@ class _ProjectDetail extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 18, color: Colors.black54),
+        Icon(
+          icon,
+          size: 18,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(
-            label,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: Colors.black87),
-          ),
+          child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
         ),
       ],
     );

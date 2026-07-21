@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:archive/archive.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kaigo_renovation_app/app_state.dart';
@@ -39,11 +40,16 @@ void main() {
 
     expect(find.text('案件'), findsOneWidget);
     expect(find.text('商品マスター'), findsOneWidget);
-    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(CupertinoSlidingSegmentedControl<int>), findsOneWidget);
     expect(
-      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      tester
+          .widget<CupertinoSlidingSegmentedControl<int>>(
+            find.byType(CupertinoSlidingSegmentedControl<int>),
+          )
+          .groupValue,
       0,
     );
+    expect(find.byType(CupertinoTabBar), findsNothing);
     expect(find.text('基本情報'), findsNothing);
     expect(find.text('山田 太郎様邸 住宅改修工事'), findsOneWidget);
     expect(find.text('山田 太郎'), findsOneWidget);
@@ -52,9 +58,9 @@ void main() {
 
     await tester.tap(find.text('山田 太郎様邸 住宅改修工事'));
     await tester.pumpAndSettle();
-    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(CupertinoTabBar), findsOneWidget);
     expect(
-      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      tester.widget<CupertinoTabBar>(find.byType(CupertinoTabBar)).currentIndex,
       2,
     );
     expect(find.text('施工箇所図面'), findsOneWidget);
@@ -69,7 +75,7 @@ void main() {
     await tester.tap(find.text('基本情報').last);
     await tester.pumpAndSettle();
     expect(find.text('お客様名'), findsOneWidget);
-    await tester.tap(find.byType(BackButton));
+    await tester.tap(find.byKey(const ValueKey('project-back-button')));
     await tester.pumpAndSettle();
     expect(find.text('施工箇所図面'), findsOneWidget);
 
@@ -92,14 +98,64 @@ void main() {
     expect(find.text('見積書内容'), findsNothing);
     expect(find.byKey(const ValueKey('excel-export-button')), findsOneWidget);
 
-    await tester.tap(find.byType(BackButton));
+    await tester.tap(find.byKey(const ValueKey('project-back-button')));
     await tester.pumpAndSettle();
     expect(find.text('施工箇所図面'), findsOneWidget);
 
-    await tester.tap(find.byType(BackButton));
+    await tester.tap(find.byKey(const ValueKey('project-back-button')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('top-navigation')), findsOneWidget);
     expect(find.text('山田 太郎様邸 住宅改修工事'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('システム設定に合わせてライトモードとダークモードを切り替える', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+
+    await tester.pumpWidget(
+      RenovationApp(
+        appState: AppState(dataRepository: MemoryAppDataRepository()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final context = tester.element(
+      find.byKey(const ValueKey('top-navigation')),
+    );
+    expect(Theme.of(context).brightness, Brightness.dark);
+    expect(CupertinoTheme.of(context).brightness, Brightness.dark);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('文字を200パーセントに拡大しても主要ナビゲーションを操作できる', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+    await tester.pumpWidget(
+      RenovationApp(
+        appState: AppState(dataRepository: MemoryAppDataRepository()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('top-navigation')), findsOneWidget);
+    await tester.tap(find.text('山田 太郎様邸 住宅改修工事'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CupertinoTabBar), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('drawing-toolbar'))).height,
+      greaterThan(68),
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -294,11 +350,16 @@ void main() {
 
     expect(find.text('商品マスター'), findsOneWidget);
     expect(find.text('デフォルト品番'), findsOneWidget);
-    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(CupertinoSlidingSegmentedControl<int>), findsOneWidget);
     expect(
-      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      tester
+          .widget<CupertinoSlidingSegmentedControl<int>>(
+            find.byType(CupertinoSlidingSegmentedControl<int>),
+          )
+          .groupValue,
       1,
     );
+    expect(find.byType(CupertinoTabBar), findsNothing);
     expect(find.text('基本情報'), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -630,7 +691,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('tool-equipment')),
-        matching: find.byIcon(Icons.widgets_outlined),
+        matching: find.byIcon(CupertinoIcons.square_grid_2x2),
       ),
       findsOneWidget,
     );

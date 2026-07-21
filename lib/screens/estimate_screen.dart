@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
@@ -35,7 +36,7 @@ class MaterialCostSection extends StatelessWidget {
             ),
             OutlinedButton.icon(
               onPressed: onOpenDrawing,
-              icon: const Icon(Icons.architecture, size: 19),
+              icon: const Icon(CupertinoIcons.square_grid_2x2, size: 19),
               label: const Text('図面を開く'),
             ),
           ],
@@ -118,11 +119,10 @@ class _EstimateLine extends StatelessWidget {
                     formatYen(cost.total),
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.primary,
-                      fontSize: 17,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  const Icon(Icons.chevron_right, size: 20),
+                  const Icon(CupertinoIcons.chevron_forward, size: 20),
                 ],
               ),
               const SizedBox(height: 8),
@@ -130,8 +130,9 @@ class _EstimateLine extends StatelessWidget {
                 spacing: 14,
                 runSpacing: 4,
                 children: [
-                  _meta(Icons.straighten, '${group.lengthMm}mm'),
+                  _meta(context, Icons.straighten, '${group.lengthMm}mm'),
                   _meta(
+                    context,
                     Icons.swap_horiz,
                     group.isConnected
                         ? 'L字'
@@ -139,16 +140,26 @@ class _EstimateLine extends StatelessWidget {
                   ),
                   if (group.isConnected)
                     _meta(
+                      context,
                       Icons.account_tree_outlined,
                       '構成 ${group.lines.length}本',
                     ),
-                  _meta(Icons.home_outlined, line.environment.label),
-                  _meta(Icons.build_outlined, line.installationType.label),
+                  _meta(context, Icons.home_outlined, line.environment.label),
                   _meta(
+                    context,
+                    Icons.build_outlined,
+                    line.installationType.label,
+                  ),
+                  _meta(
+                    context,
                     Icons.radio_button_checked,
                     'ジョイント ${cost.jointCount}個',
                   ),
-                  _meta(Icons.vertical_align_bottom, '柱 ${cost.postCount}本'),
+                  _meta(
+                    context,
+                    Icons.vertical_align_bottom,
+                    '柱 ${cost.postCount}本',
+                  ),
                 ],
               ),
               const Divider(height: 20),
@@ -164,12 +175,21 @@ class _EstimateLine extends StatelessWidget {
     );
   }
 
-  Widget _meta(IconData icon, String label) => Row(
+  Widget _meta(BuildContext context, IconData icon, String label) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      Icon(icon, size: 15, color: Colors.black54),
+      Icon(
+        icon,
+        size: 15,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
       const SizedBox(width: 4),
-      Text(label, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+      Text(
+        label,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
     ],
   );
 }
@@ -220,17 +240,18 @@ class _MaterialTotal extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       child: Row(
         children: [
-          const Expanded(
+          Expanded(
             child: Text(
               '材料原価合計',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
           ),
           Text(
             formatYen(total),
-            style: TextStyle(
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
               color: Theme.of(context).colorScheme.primary,
-              fontSize: 23,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -247,14 +268,18 @@ class _EmptyEstimate extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(vertical: 34, horizontal: 20),
     decoration: BoxDecoration(
-      border: Border.all(color: const Color(0xFFCDD4DA)),
+      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
       borderRadius: BorderRadius.circular(8),
     ),
-    child: const Column(
+    child: Column(
       children: [
-        Icon(Icons.draw_outlined, size: 36, color: Colors.black38),
-        SizedBox(height: 10),
-        Text('図面に手すりを追加すると材料原価が表示されます', textAlign: TextAlign.center),
+        Icon(
+          CupertinoIcons.pencil_outline,
+          size: 36,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(height: 10),
+        const Text('図面に手すりを追加すると材料原価が表示されます', textAlign: TextAlign.center),
       ],
     ),
   );
@@ -447,8 +472,12 @@ Future<void> showWorkLineEditor(
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF4F7F9),
-                      border: Border.all(color: const Color(0xFFDCE1E5)),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Column(
@@ -491,7 +520,7 @@ Future<void> showWorkLineEditor(
                       state.changed();
                       Navigator.pop(sheetContext);
                     },
-                    icon: const Icon(Icons.check),
+                    icon: const Icon(CupertinoIcons.check_mark),
                     label: const Text('反映する'),
                   ),
                   const SizedBox(height: 8),
@@ -501,7 +530,7 @@ Future<void> showWorkLineEditor(
                       state.deleteSelected();
                       Navigator.pop(sheetContext);
                     },
-                    icon: const Icon(Icons.delete_outline),
+                    icon: const Icon(CupertinoIcons.trash),
                     label: const Text('この手すりを削除'),
                   ),
                 ],
