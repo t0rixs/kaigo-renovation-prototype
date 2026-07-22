@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -7,22 +8,33 @@ import 'package:archive/archive.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as image;
 import 'package:kaigo_renovation_app/app_state.dart';
 import 'package:kaigo_renovation_app/documents/document_export_data.dart';
 import 'package:kaigo_renovation_app/documents/kaigo_estimate_template_writer.dart';
 import 'package:kaigo_renovation_app/main.dart';
 import 'package:kaigo_renovation_app/models.dart';
 import 'package:kaigo_renovation_app/photo_capture_session.dart';
+import 'package:kaigo_renovation_app/photos/photo_processor.dart';
 import 'package:kaigo_renovation_app/screens/drawing_painters.dart';
 import 'package:kaigo_renovation_app/screens/drawing_screen.dart';
 import 'package:kaigo_renovation_app/screens/documents_screen.dart';
 import 'package:kaigo_renovation_app/screens/estimate_screen.dart';
 import 'package:kaigo_renovation_app/screens/photos_screen.dart';
+import 'package:kaigo_renovation_app/screens/project_camera_screen.dart';
 import 'package:kaigo_renovation_app/storage/app_data_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart';
 
 void main() {
+  test('カメラ権限ダイアログのinactiveでは初期化を中断しない', () {
+    expect(
+      shouldReleaseCameraForLifecycle(AppLifecycleState.inactive),
+      isFalse,
+    );
+    expect(shouldReleaseCameraForLifecycle(AppLifecycleState.paused), isTrue);
+  });
+
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
@@ -119,7 +131,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('システム設定に合わせてライトモードとダークモードを切り替える', (tester) async {
+  testWidgets('システムがダークモードでもライトテーマを維持する', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
@@ -137,8 +149,8 @@ void main() {
     final context = tester.element(
       find.byKey(const ValueKey('top-navigation')),
     );
-    expect(Theme.of(context).brightness, Brightness.dark);
-    expect(CupertinoTheme.of(context).brightness, Brightness.dark);
+    expect(Theme.of(context).brightness, Brightness.light);
+    expect(CupertinoTheme.of(context).brightness, Brightness.light);
     expect(tester.takeException(), isNull);
   });
 
@@ -532,6 +544,46 @@ void main() {
     );
     expect(state.photoLocations.single.afterPhoto, isNull);
     expect(tester.takeException(), isNull);
+    state.dispose();
+  });
+
+  test('撮影画像は別Isolateで1280px以内のJPEGへ変換する', () async {
+    final source = image.Image(width: 2000, height: 1000);
+    final sourceBytes = image.encodeJpg(source, quality: 95);
+
+    final processedBytes = await processCapturedPhoto(sourceBytes);
+    final processed = image.decodeJpg(processedBytes);
+
+    expect(processed, isNotNull);
+    expect(processed!.width, 1280);
+    expect(processed.height, 640);
+  });
+
+  testWidgets('撮影後の画像処理中は写真枠に進捗を表示する', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AppState(dataRepository: MemoryAppDataRepository());
+    final location = state.addPhotoLocation();
+    final capture = Completer<CapturedProjectPhoto?>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PhotosScreen(state: state, capturePhoto: () => capture.future),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(ValueKey('photo-before-${location.id}')));
+    await tester.pump();
+    expect(find.text('写真を処理中'), findsOneWidget);
+    expect(find.byType(CupertinoActivityIndicator), findsOneWidget);
+
+    capture.complete(null);
+    await tester.pumpAndSettle();
+    expect(find.text('写真を処理中'), findsNothing);
     state.dispose();
   });
 
@@ -963,6 +1015,48 @@ void main() {
     state.dispose();
   });
 
+  testWidgets('間取りツール中も背面の選択間取りをハンドルからリサイズできる', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AppState();
+    state.addLayout(1000, 1000, 2000, 2000);
+    final backRoom = state.objects.single;
+    state.addLayout(2500, 2500, 1500, 1500);
+    final originalWidth = backRoom.widthMm;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: state,
+            builder: (context, _) => DrawingScreen(state: state),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('tool-layout')));
+    state.select(backRoom.id);
+    await tester.pump();
+    final handle = find.byKey(ValueKey('resize-${backRoom.id}'));
+    expect(handle, findsOneWidget);
+
+    await tester.drag(handle, const Offset(80, 80));
+    await tester.pumpAndSettle();
+
+    expect(backRoom.widthMm, greaterThan(originalWidth));
+    expect(
+      state.objects.where((item) => item.kind == PlanObjectKind.layout),
+      hasLength(2),
+    );
+    expect(tester.takeException(), isNull);
+    state.dispose();
+  });
+
   testWidgets('間取りモードのまま既存の間取りを選択できる', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -998,6 +1092,42 @@ void main() {
 
     expect(state.selectedId, room.id);
     expect(state.objects, hasLength(1));
+    state.dispose();
+  });
+
+  testWidgets('間取りの場所名テキストをタップして選択できる', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AppState();
+    state.addLayout(1000, 1000, 1500, 1500);
+    final room = state.objects.single..place = 'トイレ';
+    state.select(null);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: state,
+            builder: (context, _) => DrawingScreen(state: state),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('tool-equipment')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('equipment-toilet')));
+    await tester.pump();
+    await tester.tap(find.byKey(ValueKey('layout-label-${room.id}')));
+    await tester.pumpAndSettle();
+
+    expect(state.selectedId, room.id);
+    expect(state.objects, [room]);
+    expect(tester.takeException(), isNull);
     state.dispose();
   });
 
@@ -2811,6 +2941,47 @@ void main() {
     state.dispose();
   });
 
+  testWidgets('前面へ移動した間取りよりドアを後に描画する', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AppState();
+    state.addLayout(1000, 1000, 2000, 2000);
+    final roomWithDoor = state.objects.single;
+    expect(
+      state.addOpening(PlanObjectKind.door, 1500, 1000),
+      OpeningAddResult.added,
+    );
+    state.addLayout(1250, 750, 2000, 2000);
+    state.moveObjectBy(roomWithDoor, 250, 0);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: state,
+            builder: (context, _) => DrawingScreen(state: state),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final painters = tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((paint) => paint.painter)
+        .toList();
+    final lastLayoutIndex = painters.lastIndexWhere(
+      (painter) => painter is LayoutPainter,
+    );
+    final doorIndex = painters.indexWhere((painter) => painter is DoorPainter);
+    expect(doorIndex, greaterThan(lastLayoutIndex));
+    expect(tester.takeException(), isNull);
+    state.dispose();
+  });
+
   test('部分重複では前面の間取りが覆う背面の縁を検出する', () {
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
@@ -2963,6 +3134,37 @@ void main() {
 
     expect(state.sharedWallContactsFor(left), isEmpty);
     expect(state.sharedWallOverrides, isEmpty);
+    state.dispose();
+  });
+
+  test('図面を上または左へ拡張しても消した共有壁を維持する', () {
+    final state = AppState();
+    state.addLayout(1000, 1000, 2000, 2000);
+    final first = state.objects.single;
+    state.addLayout(3000, 1500, 1000, 1000);
+    state.setSharedWallVisible(
+      state.sharedWallContactsFor(first).single,
+      false,
+    );
+
+    expect(
+      state.resizeCanvasFromEdge(
+        CanvasResizeEdge.top,
+        state.canvasHeightMm + 500,
+      ),
+      isTrue,
+    );
+    expect(state.sharedWallContactsFor(first).single.visible, isFalse);
+
+    expect(
+      state.resizeCanvasFromEdge(
+        CanvasResizeEdge.left,
+        state.canvasWidthMm + 250,
+      ),
+      isTrue,
+    );
+    expect(state.sharedWallContactsFor(first).single.visible, isFalse);
+    expect(state.sharedWallOverrides, hasLength(1));
     state.dispose();
   });
 

@@ -452,6 +452,7 @@ class AppState extends ChangeNotifier {
           line.x1Mm += shift;
           line.x2Mm += shift;
         }
+        _shiftSharedWallOverrides(dxMm: shift);
         activeProject.canvasWidthMm = dimension;
       case CanvasResizeEdge.right:
         activeProject.canvasWidthMm = dimension;
@@ -463,12 +464,28 @@ class AppState extends ChangeNotifier {
           line.y1Mm += shift;
           line.y2Mm += shift;
         }
+        _shiftSharedWallOverrides(dyMm: shift);
         activeProject.canvasHeightMm = dimension;
       case CanvasResizeEdge.bottom:
         activeProject.canvasHeightMm = dimension;
     }
     changed();
     return true;
+  }
+
+  void _shiftSharedWallOverrides({int dxMm = 0, int dyMm = 0}) {
+    for (var index = 0; index < sharedWallOverrides.length; index++) {
+      final segment = sharedWallOverrides[index];
+      sharedWallOverrides[index] = SharedWallSegment(
+        roomAId: segment.roomAId,
+        roomBId: segment.roomBId,
+        horizontal: segment.horizontal,
+        coordinateMm: segment.coordinateMm + (segment.horizontal ? dyMm : dxMm),
+        startMm: segment.startMm + (segment.horizontal ? dxMm : dyMm),
+        endMm: segment.endMm + (segment.horizontal ? dxMm : dyMm),
+        visible: segment.visible,
+      );
+    }
   }
 
   Object? get selected =>

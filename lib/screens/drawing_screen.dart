@@ -372,11 +372,25 @@ class _DrawingScreenState extends State<DrawingScreen> {
                               )
                               .expand(_expandedLayoutHitTargets),
                           ..._selectedExpandedHitTargets(),
-                          ...state.objects.map(_planObject),
+                          ...state.objects
+                              .where(
+                                (item) =>
+                                    item.kind != PlanObjectKind.door &&
+                                    item.kind != PlanObjectKind.window,
+                              )
+                              .map(_planObject),
+                          ...state.objects
+                              .where(
+                                (item) =>
+                                    item.kind == PlanObjectKind.door ||
+                                    item.kind == PlanObjectKind.window,
+                              )
+                              .map(_planObject),
                           ...state.lines.expand(_lineHitTargets),
                           if (state.selected is WorkLine)
                             ..._lineControls(state.selected! as WorkLine),
                           ..._selectedSharedWallButtons(),
+                          ..._selectedLayoutResizeHandle(),
                           if (canvasSettingsActive) ..._canvasResizeHandles(),
                         ],
                       ),
@@ -478,6 +492,11 @@ class _DrawingScreenState extends State<DrawingScreen> {
       return;
     }
     if (multiTouchGestureActive) return;
+    if (_isDragTool &&
+        (_selectedLayoutResizeRect()?.contains(event.localPosition) ?? false)) {
+      _suppressCanvasInteraction();
+      return;
+    }
     if (!_isDragTool || pointerEditingExisting) return;
     draftPointer = event.pointer;
     _startDraft(event.localPosition);
@@ -905,19 +924,6 @@ class _DrawingScreenState extends State<DrawingScreen> {
                   cutouts: cutouts,
                   wallGaps: wallGaps,
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Align(
-                    alignment: Alignment.topLeft,
-                    child: Text(
-                      _objectPlaceName(item),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
               ),
             ),
           ),
@@ -934,24 +940,66 @@ class _DrawingScreenState extends State<DrawingScreen> {
                 child: const SizedBox.expand(),
               ),
             ),
-          if (selected)
-            Positioned(
-              right: 3,
-              bottom: 3,
-              width: 32,
-              height: 32,
-              child: _objectGestureTarget(
-                item: item,
-                selected: selected,
-                objectSize: size,
-                canvasOrigin: rect.bottomRight - const Offset(35, 35),
-                forceResize: true,
-                child: _resizeDot(item),
-              ),
-            ),
+          Positioned(left: 6, top: 4, child: _layoutLabelTarget(item)),
         ],
       ),
     );
+  }
+
+  Widget _layoutLabelTarget(PlanObject item) => Listener(
+    behavior: HitTestBehavior.opaque,
+    onPointerDown: (_) => _suppressCanvasInteraction(),
+    onPointerUp: (_) => _releaseCanvasInteraction(),
+    onPointerCancel: (_) => _releaseCanvasInteraction(),
+    child: GestureDetector(
+      key: ValueKey('layout-label-${item.id}'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => state.select(item.id),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          child: Text(
+            _objectPlaceName(item),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Rect? _selectedLayoutResizeRect() {
+    final selected = state.selected;
+    if (selected is! PlanObject || selected.kind != PlanObjectKind.layout) {
+      return null;
+    }
+    const hitSize = 44.0;
+    final rect = _objectRect(selected);
+    return Rect.fromLTWH(
+      rect.right - hitSize,
+      rect.bottom - hitSize,
+      hitSize,
+      hitSize,
+    );
+  }
+
+  List<Widget> _selectedLayoutResizeHandle() {
+    final selected = state.selected;
+    final handleRect = _selectedLayoutResizeRect();
+    if (selected is! PlanObject || handleRect == null) return const [];
+    return [
+      Positioned.fromRect(
+        rect: handleRect,
+        child: _objectGestureTarget(
+          item: selected,
+          selected: true,
+          objectSize: _objectRect(selected).size,
+          canvasOrigin: handleRect.topLeft,
+          forceResize: true,
+          child: Center(child: _resizeDot(selected)),
+        ),
+      ),
+    ];
   }
 
   List<Widget> _selectedSharedWallButtons() {

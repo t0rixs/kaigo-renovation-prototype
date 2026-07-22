@@ -48,9 +48,8 @@ class _RenovationAppState extends State<RenovationApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      theme: buildAppTheme(Brightness.light),
-      darkTheme: buildAppTheme(Brightness.dark),
-      themeMode: ThemeMode.system,
+      theme: buildAppTheme(),
+      themeMode: ThemeMode.light,
       home: AnimatedBuilder(
         animation: state,
         builder: (context, _) =>

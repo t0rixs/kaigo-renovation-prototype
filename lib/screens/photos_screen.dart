@@ -1,14 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:camera/camera.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../app_state.dart';
 import '../models.dart';
 import '../photo_capture_session.dart';
+import '../photos/photo_processor.dart';
+import 'project_camera_screen.dart';
 
 typedef ProjectPhotoCapture = Future<CapturedProjectPhoto?> Function();
 
@@ -22,37 +24,16 @@ class PhotosScreen extends StatefulWidget {
   State<PhotosScreen> createState() => _PhotosScreenState();
 }
 
-class _PhotosScreenState extends State<PhotosScreen>
-    with WidgetsBindingObserver {
-  final ImagePicker _picker = ImagePicker();
+class _PhotosScreenState extends State<PhotosScreen> {
   final Set<String> _busySlots = {};
-  Completer<void>? _resumeCompleter;
 
   AppState get state => widget.state;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     if (widget.capturePhoto == null) {
-      unawaited(_recoverInterruptedCapture());
-    }
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    if (_resumeCompleter?.isCompleted == false) {
-      _resumeCompleter?.complete();
-    }
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
-    if (lifecycleState == AppLifecycleState.resumed &&
-        _resumeCompleter?.isCompleted == false) {
-      _resumeCompleter?.complete();
+      unawaited(_clearInterruptedCaptureSession());
     }
   }
 
@@ -128,8 +109,8 @@ class _PhotosScreenState extends State<PhotosScreen>
         slot: slot,
         photo: photo,
       );
-    } on PlatformException catch (error) {
-      _showError(_cameraErrorMessage(error));
+    } on CameraException catch (_) {
+      _showError('カメラを使用できませんでした。');
     } catch (_) {
       _showError('写真を読み込めませんでした。もう一度お試しください。');
     } finally {
@@ -147,81 +128,41 @@ class _PhotosScreenState extends State<PhotosScreen>
       slot: slot,
     );
 
-    final file = await _picker.pickImage(
-      source: ImageSource.camera,
-      maxWidth: 1280,
-      maxHeight: 1280,
-      imageQuality: 70,
-      requestFullMetadata: false,
+    if (!mounted) return null;
+    final file = await Navigator.of(context).push<XFile>(
+      CupertinoPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const ProjectCameraScreen(),
+      ),
     );
     await PhotoCaptureSession.clear();
     return file == null ? null : _photoFromFile(file);
   }
 
-  Future<void> _recoverInterruptedCapture() async {
+  Future<void> _clearInterruptedCaptureSession() async {
     final pending = await PhotoCaptureSession.read();
     if (pending == null) return;
-    await _waitUntilResumed();
-    if (!mounted) return;
-
-    try {
-      final response = await _picker.retrieveLostData();
-      final file = response.files?.firstOrNull;
-      if (file != null) {
-        final photo = await _photoFromFile(file);
-        state.setProjectPhoto(
-          projectId: pending.projectId,
-          locationId: pending.locationId,
-          slot: pending.slot,
-          photo: photo,
-        );
-      } else if (response.exception != null) {
-        _showError(_cameraErrorMessage(response.exception!));
-      }
-    } on PlatformException catch (error) {
-      _showError(_cameraErrorMessage(error));
-    } catch (_) {
-      _showError('撮影した写真を復元できませんでした。');
-    } finally {
-      await PhotoCaptureSession.clear();
-    }
-  }
-
-  Future<void> _waitUntilResumed() async {
-    if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
-      return;
-    }
-    final completer = _resumeCompleter ??= Completer<void>();
-    await completer.future;
-    if (identical(_resumeCompleter, completer)) {
-      _resumeCompleter = null;
-    }
+    await PhotoCaptureSession.clear();
   }
 
   Future<CapturedProjectPhoto> _photoFromFile(XFile file) async {
-    final bytes = await file.readAsBytes();
+    final sourceBytes = await file.readAsBytes();
+    final bytes = await processCapturedPhoto(sourceBytes);
     return CapturedProjectPhoto(
       base64Data: base64Encode(bytes),
-      mimeType: _mimeType(file),
-      fileName: file.name,
+      mimeType: 'image/jpeg',
+      fileName: _jpegFileName(file.name),
       capturedAt: DateTime.now(),
     );
   }
 
-  String _mimeType(XFile file) {
-    if (file.mimeType?.isNotEmpty == true) return file.mimeType!;
-    final name = file.name.toLowerCase();
-    if (name.endsWith('.png')) return 'image/png';
-    if (name.endsWith('.heic') || name.endsWith('.heif')) return 'image/heic';
-    return 'image/jpeg';
+  String _jpegFileName(String originalName) {
+    final separator = originalName.lastIndexOf('.');
+    final stem = separator <= 0
+        ? originalName
+        : originalName.substring(0, separator);
+    return '$stem.jpg';
   }
-
-  String _cameraErrorMessage(PlatformException error) => switch (error.code) {
-    'camera_access_denied' || 'camera_access_denied_without_prompt' =>
-      'カメラの利用が許可されていません。端末の設定から許可してください。',
-    'camera_access_restricted' => 'この端末ではカメラを利用できません。',
-    _ => 'カメラを起動できませんでした。もう一度お試しください。',
-  };
 
   void _showError(String message) {
     if (!mounted) return;
@@ -373,7 +314,14 @@ class _PhotoSlot extends StatelessWidget {
                       ColoredBox(
                         color: colors.surface.withValues(alpha: .72),
                         child: const Center(
-                          child: CupertinoActivityIndicator(),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CupertinoActivityIndicator(radius: 14),
+                              SizedBox(height: 9),
+                              Text('写真を処理中'),
+                            ],
+                          ),
                         ),
                       ),
                   ],

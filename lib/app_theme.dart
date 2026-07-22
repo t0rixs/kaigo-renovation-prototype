@@ -1,32 +1,28 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
-ThemeData buildAppTheme(Brightness brightness) {
-  final isDark = brightness == Brightness.dark;
-  final primary = isDark ? const Color(0xFF0A84FF) : const Color(0xFF007AFF);
-  final error = isDark ? const Color(0xFFFF453A) : const Color(0xFFFF3B30);
-  final background = isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7);
-  final surface = isDark ? const Color(0xFF1C1C1E) : const Color(0xFFFFFFFF);
-  final elevatedSurface = isDark
-      ? const Color(0xFF2C2C2E)
-      : const Color(0xFFFFFFFF);
-  final fieldFill = isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7);
-  final primaryLabel = isDark
-      ? const Color(0xFFF2F2F7)
-      : const Color(0xFF1C1C1E);
-  final secondaryLabel = isDark
-      ? const Color(0xFFAEAEB2)
-      : const Color(0xFF636366);
-  final separator = isDark ? const Color(0xFF38383A) : const Color(0xFFC6C6C8);
+ThemeData buildAppTheme() {
+  const primary = Color(0xFF007AFF);
+  const error = Color(0xFFFF3B30);
+  const background = Color(0xFFF2F2F7);
+  const surface = Color(0xFFFFFFFF);
+  const elevatedSurface = Color(0xFFFFFFFF);
+  const fieldFill = Color(0xFFF2F2F7);
+  const primaryLabel = Color(0xFF1C1C1E);
+  const secondaryLabel = Color(0xFF636366);
+  const separator = Color(0xFFC6C6C8);
 
   final scheme =
-      ColorScheme.fromSeed(seedColor: primary, brightness: brightness).copyWith(
+      ColorScheme.fromSeed(
+        seedColor: primary,
+        brightness: Brightness.light,
+      ).copyWith(
         primary: primary,
         onPrimary: Colors.white,
-        primaryContainer: primary.withValues(alpha: isDark ? .22 : .12),
+        primaryContainer: primary.withValues(alpha: .12),
         onPrimaryContainer: primary,
-        secondary: isDark ? const Color(0xFF5E5CE6) : const Color(0xFF5856D6),
-        tertiary: isDark ? const Color(0xFF30D158) : const Color(0xFF248A3D),
+        secondary: const Color(0xFF5856D6),
+        tertiary: const Color(0xFF248A3D),
         error: error,
         onError: Colors.white,
         surface: surface,
@@ -42,7 +38,7 @@ ThemeData buildAppTheme(Brightness brightness) {
       );
   final base = ThemeData(
     useMaterial3: true,
-    brightness: brightness,
+    brightness: Brightness.light,
     colorScheme: scheme,
     scaffoldBackgroundColor: background,
     visualDensity: VisualDensity.standard,
@@ -210,7 +206,7 @@ ThemeData buildAppTheme(Brightness brightness) {
       },
     ),
     cupertinoOverrideTheme: CupertinoThemeData(
-      brightness: brightness,
+      brightness: Brightness.light,
       primaryColor: primary,
       scaffoldBackgroundColor: background,
       barBackgroundColor: surface.withValues(alpha: .88),
