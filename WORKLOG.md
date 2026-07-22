@@ -505,6 +505,9 @@
 - `flutter analyze`を実行し、問題がないことを確認した。
 - `flutter test --reporter compact`を実行し、既存を含む全103テストが成功した。
 - GitHub Pages用の`base-href`でFlutter Webリリースビルドが成功し、生成HTMLにもライト固定指定が含まれることを確認した。
+- GitHub Actionsの解析、全テスト、Webビルド、GitHub Pagesデプロイがすべて成功した。
+- 公開URLで計算済みの配色が`light only`、HTMLとbodyの背景が`rgb(242, 242, 247)`であることを確認した。
+- 公開版のブラウザコンソールに警告・エラーがないことを確認した。
 
 ### 結果
 
@@ -512,4 +515,4 @@
 
 ### 未完了・次に必要なもの
 
-- GitHub Pagesへの反映後、公開URLで最終確認する。
+- なし。
