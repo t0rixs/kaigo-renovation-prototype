@@ -12,6 +12,7 @@ import 'package:kaigo_renovation_app/documents/document_export_data.dart';
 import 'package:kaigo_renovation_app/documents/kaigo_estimate_template_writer.dart';
 import 'package:kaigo_renovation_app/main.dart';
 import 'package:kaigo_renovation_app/models.dart';
+import 'package:kaigo_renovation_app/photo_capture_session.dart';
 import 'package:kaigo_renovation_app/screens/drawing_painters.dart';
 import 'package:kaigo_renovation_app/screens/drawing_screen.dart';
 import 'package:kaigo_renovation_app/screens/documents_screen.dart';
@@ -532,6 +533,44 @@ void main() {
     expect(state.photoLocations.single.afterPhoto, isNull);
     expect(tester.takeException(), isNull);
     state.dispose();
+  });
+
+  testWidgets('撮影中にアプリが再起動しても対象案件の写真一覧へ戻る', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final repository = MemoryAppDataRepository();
+    final savedState = AppState(dataRepository: repository);
+    final firstProjectId = savedState.activeProject.id;
+    final secondProject = savedState.createProject();
+    secondProject.customer.projectName = '撮影中の案件';
+    final location = savedState.addPhotoLocation();
+    await savedState.saveNow();
+    await PhotoCaptureSession.begin(
+      projectId: secondProject.id,
+      locationId: location.id,
+      slot: ProjectPhotoSlot.before,
+    );
+    savedState.selectProject(firstProjectId);
+    await savedState.saveNow();
+    savedState.dispose();
+
+    final resumedState = AppState(dataRepository: repository);
+    await tester.pumpWidget(RenovationApp(appState: resumedState));
+    await tester.pumpAndSettle();
+
+    expect(resumedState.activeProject.id, secondProject.id);
+    expect(find.byKey(const ValueKey('photos-screen')), findsOneWidget);
+    expect(find.text('写真'), findsWidgets);
+    expect(find.text('改修場所 1'), findsOneWidget);
+    expect(
+      tester.widget<CupertinoTabBar>(find.byType(CupertinoTabBar)).currentIndex,
+      3,
+    );
+    expect(find.byKey(const ValueKey('top-navigation')), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   test('図面サイズは250mm単位で案件JSONへ保存する', () async {

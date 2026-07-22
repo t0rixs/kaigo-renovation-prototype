@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../models.dart';
+import '../photo_capture_session.dart';
 import 'app_shell.dart';
 import 'products_screen.dart';
 
@@ -18,10 +21,38 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int index = 0;
 
-  void _openProject(BuildContext context, RenovationProject project) {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_resumePendingPhotoCapture());
+    });
+  }
+
+  Future<void> _resumePendingPhotoCapture() async {
+    final pending = await PhotoCaptureSession.read();
+    if (!mounted || pending == null) return;
+    final project = widget.state.projects
+        .where((item) => item.id == pending.projectId)
+        .firstOrNull;
+    if (project == null) {
+      await PhotoCaptureSession.clear();
+      return;
+    }
+    _openProject(context, project, initialIndex: AppShell.photosTabIndex);
+  }
+
+  void _openProject(
+    BuildContext context,
+    RenovationProject project, {
+    int initialIndex = AppShell.drawingTabIndex,
+  }) {
     widget.state.selectProject(project.id);
     Navigator.of(context).push(
-      CupertinoPageRoute<void>(builder: (_) => AppShell(state: widget.state)),
+      CupertinoPageRoute<void>(
+        builder: (_) =>
+            AppShell(state: widget.state, initialIndex: initialIndex),
+      ),
     );
   }
 

@@ -5,10 +5,10 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app_state.dart';
 import '../models.dart';
+import '../photo_capture_session.dart';
 
 typedef ProjectPhotoCapture = Future<CapturedProjectPhoto?> Function();
 
@@ -22,21 +22,37 @@ class PhotosScreen extends StatefulWidget {
   State<PhotosScreen> createState() => _PhotosScreenState();
 }
 
-class _PhotosScreenState extends State<PhotosScreen> {
-  static const _pendingProjectKey = 'pendingPhotoProjectId';
-  static const _pendingLocationKey = 'pendingPhotoLocationId';
-  static const _pendingSlotKey = 'pendingPhotoSlot';
-
+class _PhotosScreenState extends State<PhotosScreen>
+    with WidgetsBindingObserver {
   final ImagePicker _picker = ImagePicker();
   final Set<String> _busySlots = {};
+  Completer<void>? _resumeCompleter;
 
   AppState get state => widget.state;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (widget.capturePhoto == null) {
       unawaited(_recoverInterruptedCapture());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (_resumeCompleter?.isCompleted == false) {
+      _resumeCompleter?.complete();
+    }
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
+    if (lifecycleState == AppLifecycleState.resumed &&
+        _resumeCompleter?.isCompleted == false) {
+      _resumeCompleter?.complete();
     }
   }
 
@@ -125,10 +141,11 @@ class _PhotosScreenState extends State<PhotosScreen> {
     String locationId,
     ProjectPhotoSlot slot,
   ) async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(_pendingProjectKey, state.activeProject.id);
-    await preferences.setString(_pendingLocationKey, locationId);
-    await preferences.setString(_pendingSlotKey, slot.name);
+    await PhotoCaptureSession.begin(
+      projectId: state.activeProject.id,
+      locationId: locationId,
+      slot: slot,
+    );
 
     final file = await _picker.pickImage(
       source: ImageSource.camera,
@@ -137,29 +154,25 @@ class _PhotosScreenState extends State<PhotosScreen> {
       imageQuality: 70,
       requestFullMetadata: false,
     );
-    await _clearPendingCapture(preferences);
+    await PhotoCaptureSession.clear();
     return file == null ? null : _photoFromFile(file);
   }
 
   Future<void> _recoverInterruptedCapture() async {
-    final preferences = await SharedPreferences.getInstance();
-    final projectId = preferences.getString(_pendingProjectKey);
-    final locationId = preferences.getString(_pendingLocationKey);
-    final slotName = preferences.getString(_pendingSlotKey);
-    if (projectId == null || locationId == null || slotName == null) return;
+    final pending = await PhotoCaptureSession.read();
+    if (pending == null) return;
+    await _waitUntilResumed();
+    if (!mounted) return;
 
     try {
       final response = await _picker.retrieveLostData();
       final file = response.files?.firstOrNull;
-      final slot = ProjectPhotoSlot.values
-          .where((item) => item.name == slotName)
-          .firstOrNull;
-      if (file != null && slot != null) {
+      if (file != null) {
         final photo = await _photoFromFile(file);
         state.setProjectPhoto(
-          projectId: projectId,
-          locationId: locationId,
-          slot: slot,
+          projectId: pending.projectId,
+          locationId: pending.locationId,
+          slot: pending.slot,
           photo: photo,
         );
       } else if (response.exception != null) {
@@ -167,8 +180,21 @@ class _PhotosScreenState extends State<PhotosScreen> {
       }
     } on PlatformException catch (error) {
       _showError(_cameraErrorMessage(error));
+    } catch (_) {
+      _showError('撮影した写真を復元できませんでした。');
     } finally {
-      await _clearPendingCapture(preferences);
+      await PhotoCaptureSession.clear();
+    }
+  }
+
+  Future<void> _waitUntilResumed() async {
+    if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+      return;
+    }
+    final completer = _resumeCompleter ??= Completer<void>();
+    await completer.future;
+    if (identical(_resumeCompleter, completer)) {
+      _resumeCompleter = null;
     }
   }
 
@@ -188,14 +214,6 @@ class _PhotosScreenState extends State<PhotosScreen> {
     if (name.endsWith('.png')) return 'image/png';
     if (name.endsWith('.heic') || name.endsWith('.heif')) return 'image/heic';
     return 'image/jpeg';
-  }
-
-  Future<void> _clearPendingCapture(SharedPreferences preferences) async {
-    await Future.wait([
-      preferences.remove(_pendingProjectKey),
-      preferences.remove(_pendingLocationKey),
-      preferences.remove(_pendingSlotKey),
-    ]);
   }
 
   String _cameraErrorMessage(PlatformException error) => switch (error.code) {

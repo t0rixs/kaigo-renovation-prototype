@@ -9,28 +9,40 @@ import 'photos_screen.dart';
 import 'products_screen.dart';
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key, required this.state});
+  const AppShell({
+    super.key,
+    required this.state,
+    this.initialIndex = drawingTabIndex,
+  });
+
+  static const drawingTabIndex = 2;
+  static const photosTabIndex = 3;
 
   final AppState state;
+  final int initialIndex;
 
   @override
   State<AppShell> createState() => _AppShellState();
 }
 
 class _AppShellState extends State<AppShell> {
-  static const drawingIndex = 2;
-
-  int index = drawingIndex;
+  late int index;
 
   static const titles = ['基本情報', '品番', '施工箇所図面', '写真', '書類'];
 
+  @override
+  void initState() {
+    super.initState();
+    index = widget.initialIndex;
+  }
+
   void _openDrawing() {
     FocusManager.instance.primaryFocus?.unfocus();
-    setState(() => index = drawingIndex);
+    setState(() => index = AppShell.drawingTabIndex);
   }
 
   void _handleBack() {
-    if (index != drawingIndex) {
+    if (index != AppShell.drawingTabIndex) {
       _openDrawing();
       return;
     }
@@ -42,9 +54,9 @@ class _AppShellState extends State<AppShell> {
     return AnimatedBuilder(
       animation: widget.state,
       builder: (context, _) => PopScope<void>(
-        canPop: index == drawingIndex,
+        canPop: index == AppShell.drawingTabIndex,
         onPopInvokedWithResult: (didPop, _) {
-          if (!didPop && index != drawingIndex) {
+          if (!didPop && index != AppShell.drawingTabIndex) {
             _openDrawing();
           }
         },
@@ -52,7 +64,7 @@ class _AppShellState extends State<AppShell> {
           appBar: CupertinoNavigationBar(
             automaticallyImplyLeading: false,
             leading: Tooltip(
-              message: index == drawingIndex ? '案件一覧へ戻る' : '図面へ戻る',
+              message: index == AppShell.drawingTabIndex ? '案件一覧へ戻る' : '図面へ戻る',
               child: CupertinoButton(
                 key: const ValueKey('project-back-button'),
                 padding: EdgeInsets.zero,
