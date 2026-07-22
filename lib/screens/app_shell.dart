@@ -5,6 +5,7 @@ import '../app_state.dart';
 import 'basic_info_screen.dart';
 import 'documents_screen.dart';
 import 'drawing_screen.dart';
+import 'photos_screen.dart';
 import 'products_screen.dart';
 
 class AppShell extends StatefulWidget {
@@ -21,7 +22,7 @@ class _AppShellState extends State<AppShell> {
 
   int index = drawingIndex;
 
-  static const titles = ['基本情報', '品番', '施工箇所図面', '書類'];
+  static const titles = ['基本情報', '品番', '施工箇所図面', '写真', '書類'];
 
   void _openDrawing() {
     FocusManager.instance.primaryFocus?.unfocus();
@@ -67,6 +68,7 @@ class _AppShellState extends State<AppShell> {
               BasicInfoScreen(state: widget.state),
               ProductsScreen(state: widget.state),
               DrawingScreen(state: widget.state),
+              PhotosScreen(state: widget.state),
               DocumentsScreen(state: widget.state, onOpenDrawing: _openDrawing),
             ],
           ),
@@ -92,6 +94,11 @@ class _AppShellState extends State<AppShell> {
                 icon: Icon(CupertinoIcons.square_grid_2x2),
                 activeIcon: Icon(CupertinoIcons.square_grid_2x2_fill),
                 label: '図面',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(CupertinoIcons.camera),
+                activeIcon: Icon(CupertinoIcons.camera_fill),
+                label: '写真',
               ),
               BottomNavigationBarItem(
                 icon: Icon(CupertinoIcons.doc_text),

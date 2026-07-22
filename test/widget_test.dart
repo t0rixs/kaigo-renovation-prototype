@@ -16,6 +16,7 @@ import 'package:kaigo_renovation_app/screens/drawing_painters.dart';
 import 'package:kaigo_renovation_app/screens/drawing_screen.dart';
 import 'package:kaigo_renovation_app/screens/documents_screen.dart';
 import 'package:kaigo_renovation_app/screens/estimate_screen.dart';
+import 'package:kaigo_renovation_app/screens/photos_screen.dart';
 import 'package:kaigo_renovation_app/storage/app_data_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart';
@@ -25,7 +26,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets('トップから案件を選び4画面を表示できる', (tester) async {
+  testWidgets('トップから案件を選び5画面を表示できる', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -86,6 +87,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('施工箇所図面'), findsOneWidget);
     expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('写真').last);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('photos-screen')), findsOneWidget);
+    expect(find.byKey(const ValueKey('add-photo-location')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('project-back-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('施工箇所図面'), findsOneWidget);
 
     await tester.tap(find.text('書類').last);
     await tester.pumpAndSettle();
@@ -424,11 +433,104 @@ void main() {
     expect(productMaster['products'], hasLength(2));
     expect(project['basicInfo'], isA<Map<String, dynamic>>());
     expect(project['documents'], isA<Map<String, dynamic>>());
+    expect(project['photos'], isA<List<dynamic>>());
     expect(drawing['canvas'], {'widthMm': 10000, 'heightMm': 7500});
     expect(drawing['objects'], hasLength(4));
     expect(drawing['handrails'], hasLength(1));
     expect(estimate['handrails'], hasLength(1));
     expect(estimate['materialCostTotal'], 5800);
+    state.dispose();
+  });
+
+  test('改修場所と施工前後の写真を案件JSONへ保存できる', () async {
+    final repository = MemoryAppDataRepository();
+    final state = AppState(dataRepository: repository);
+    final location = state.addPhotoLocation();
+    final before = CapturedProjectPhoto(
+      base64Data: 'YmVmb3Jl',
+      mimeType: 'image/jpeg',
+      fileName: 'before.jpg',
+      capturedAt: DateTime(2026, 7, 22, 10, 30),
+    );
+    final after = CapturedProjectPhoto(
+      base64Data: 'YWZ0ZXI=',
+      mimeType: 'image/jpeg',
+      fileName: 'after.jpg',
+      capturedAt: DateTime(2026, 7, 22, 11, 30),
+    );
+
+    expect(
+      state.setProjectPhoto(
+        projectId: state.activeProject.id,
+        locationId: location.id,
+        slot: ProjectPhotoSlot.before,
+        photo: before,
+      ),
+      isTrue,
+    );
+    expect(
+      state.setProjectPhoto(
+        projectId: state.activeProject.id,
+        locationId: location.id,
+        slot: ProjectPhotoSlot.after,
+        photo: after,
+      ),
+      isTrue,
+    );
+    await state.saveNow();
+
+    final restored = AppState(dataRepository: repository);
+    await restored.load();
+    expect(restored.photoLocations, hasLength(1));
+    expect(restored.photoLocations.single.locationName, '改修場所 1');
+    expect(restored.photoLocations.single.beforePhoto?.base64Data, 'YmVmb3Jl');
+    expect(restored.photoLocations.single.afterPhoto?.base64Data, 'YWZ0ZXI=');
+    state.dispose();
+    restored.dispose();
+  });
+
+  testWidgets('写真画面で改修場所を追加し改修前の写真を記録できる', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AppState(dataRepository: MemoryAppDataRepository());
+    final photo = CapturedProjectPhoto(
+      base64Data:
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      mimeType: 'image/png',
+      fileName: 'camera.png',
+      capturedAt: DateTime(2026, 7, 22),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PhotosScreen(state: state, capturePhoto: () async => photo),
+        ),
+      ),
+    );
+
+    expect(find.text('まだ写真はありません'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('add-photo-location')));
+    await tester.pumpAndSettle();
+
+    final location = state.photoLocations.single;
+    expect(find.text('改修場所 1'), findsOneWidget);
+    expect(find.text('改修前'), findsOneWidget);
+    expect(find.text('改修後'), findsOneWidget);
+    expect(find.byKey(ValueKey('photo-before-${location.id}')), findsOneWidget);
+    expect(find.byKey(ValueKey('photo-after-${location.id}')), findsOneWidget);
+
+    await tester.tap(find.byKey(ValueKey('photo-before-${location.id}')));
+    await tester.pumpAndSettle();
+    expect(state.photoLocations.single.beforePhoto?.fileName, 'camera.png');
+    expect(
+      find.byKey(ValueKey('photo-image-before-${location.id}')),
+      findsOneWidget,
+    );
+    expect(state.photoLocations.single.afterPhoto, isNull);
+    expect(tester.takeException(), isNull);
     state.dispose();
   });
 

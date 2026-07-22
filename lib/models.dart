@@ -175,6 +175,89 @@ class ProjectDocuments {
   }
 }
 
+enum ProjectPhotoSlot { before, after }
+
+class CapturedProjectPhoto {
+  CapturedProjectPhoto({
+    required this.base64Data,
+    required this.mimeType,
+    required this.fileName,
+    required this.capturedAt,
+  });
+
+  String base64Data;
+  String mimeType;
+  String fileName;
+  DateTime capturedAt;
+
+  Map<String, dynamic> toJson() => {
+    'base64Data': base64Data,
+    'mimeType': mimeType,
+    'fileName': fileName,
+    'capturedAt': capturedAt.toUtc().toIso8601String(),
+  };
+
+  factory CapturedProjectPhoto.fromJson(Map<String, dynamic> json) =>
+      CapturedProjectPhoto(
+        base64Data: json['base64Data'] as String? ?? '',
+        mimeType: json['mimeType'] as String? ?? 'image/jpeg',
+        fileName: json['fileName'] as String? ?? 'photo.jpg',
+        capturedAt:
+            DateTime.tryParse(json['capturedAt'] as String? ?? '')?.toLocal() ??
+            DateTime.now(),
+      );
+}
+
+class RenovationPhotoLocation {
+  RenovationPhotoLocation({
+    required this.id,
+    required this.locationName,
+    this.beforePhoto,
+    this.afterPhoto,
+  });
+
+  String id;
+  String locationName;
+  CapturedProjectPhoto? beforePhoto;
+  CapturedProjectPhoto? afterPhoto;
+
+  CapturedProjectPhoto? photoFor(ProjectPhotoSlot slot) => switch (slot) {
+    ProjectPhotoSlot.before => beforePhoto,
+    ProjectPhotoSlot.after => afterPhoto,
+  };
+
+  void setPhoto(ProjectPhotoSlot slot, CapturedProjectPhoto photo) {
+    switch (slot) {
+      case ProjectPhotoSlot.before:
+        beforePhoto = photo;
+      case ProjectPhotoSlot.after:
+        afterPhoto = photo;
+    }
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'locationName': locationName,
+    'beforePhoto': beforePhoto?.toJson(),
+    'afterPhoto': afterPhoto?.toJson(),
+  };
+
+  factory RenovationPhotoLocation.fromJson(
+    Map<String, dynamic> json,
+  ) => RenovationPhotoLocation(
+    id: json['id'] as String? ?? '',
+    locationName: json['locationName'] as String? ?? '',
+    beforePhoto: switch (json['beforePhoto']) {
+      final Map<String, dynamic> value => CapturedProjectPhoto.fromJson(value),
+      _ => null,
+    },
+    afterPhoto: switch (json['afterPhoto']) {
+      final Map<String, dynamic> value => CapturedProjectPhoto.fromJson(value),
+      _ => null,
+    },
+  );
+}
+
 class RenovationProject {
   static const defaultCanvasWidthMm = 10000;
   static const defaultCanvasHeightMm = 7500;
@@ -188,8 +271,10 @@ class RenovationProject {
     this.canvasWidthMm = defaultCanvasWidthMm,
     this.canvasHeightMm = defaultCanvasHeightMm,
     ProjectDocuments? documents,
+    List<RenovationPhotoLocation>? photoLocations,
     List<SharedWallSegment>? sharedWallOverrides,
   }) : documents = documents ?? ProjectDocuments(),
+       photoLocations = photoLocations ?? [],
        sharedWallOverrides = sharedWallOverrides ?? [];
 
   String id;
@@ -200,6 +285,7 @@ class RenovationProject {
   int canvasWidthMm;
   int canvasHeightMm;
   ProjectDocuments documents;
+  List<RenovationPhotoLocation> photoLocations;
   List<SharedWallSegment> sharedWallOverrides;
 
   Map<String, dynamic> toJson() => {
@@ -211,6 +297,7 @@ class RenovationProject {
       'handrails': lines.map((item) => item.toJson()).toList(),
       'sharedWalls': sharedWallOverrides.map((item) => item.toJson()).toList(),
     },
+    'photos': photoLocations.map((item) => item.toJson()).toList(),
     'documents': documents.toJson(),
     'updatedAt': updatedAt.toUtc().toIso8601String(),
   };
@@ -261,6 +348,13 @@ class RenovationProject {
       documents: ProjectDocuments.fromJson(
         json['documents'] as Map<String, dynamic>? ?? const {},
       ),
+      photoLocations: ((json['photos'] as List<dynamic>?) ?? const [])
+          .map(
+            (item) =>
+                RenovationPhotoLocation.fromJson(item as Map<String, dynamic>),
+          )
+          .where((item) => item.id.isNotEmpty)
+          .toList(),
       updatedAt:
           DateTime.tryParse(json['updatedAt'] as String? ?? '')?.toLocal() ??
           DateTime.now(),

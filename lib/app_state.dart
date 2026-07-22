@@ -68,6 +68,8 @@ class AppState extends ChangeNotifier {
   set lines(List<WorkLine> value) => activeProject.lines = value;
 
   ProjectDocuments get documents => activeProject.documents;
+  List<RenovationPhotoLocation> get photoLocations =>
+      activeProject.photoLocations;
   List<SharedWallSegment> get sharedWallOverrides =>
       activeProject.sharedWallOverrides;
   int get canvasWidthMm => activeProject.canvasWidthMm;
@@ -149,6 +151,38 @@ class AppState extends ChangeNotifier {
     _undoStack.clear();
     _redoStack.clear();
     changed(projectChanged: false);
+  }
+
+  RenovationPhotoLocation addPhotoLocation() {
+    final location = RenovationPhotoLocation(
+      id: newId('photo-location'),
+      locationName: '改修場所 ${photoLocations.length + 1}',
+    );
+    photoLocations.add(location);
+    _undoStack.clear();
+    _redoStack.clear();
+    changed();
+    return location;
+  }
+
+  bool setProjectPhoto({
+    required String projectId,
+    required String locationId,
+    required ProjectPhotoSlot slot,
+    required CapturedProjectPhoto photo,
+  }) {
+    final project = projects.where((item) => item.id == projectId).firstOrNull;
+    final location = project?.photoLocations
+        .where((item) => item.id == locationId)
+        .firstOrNull;
+    if (project == null || location == null) return false;
+
+    location.setPhoto(slot, photo);
+    project.updatedAt = DateTime.now();
+    _undoStack.clear();
+    _redoStack.clear();
+    changed(projectChanged: false);
+    return true;
   }
 
   Map<String, dynamic> toJson() => {
