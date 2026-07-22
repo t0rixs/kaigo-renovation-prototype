@@ -35,6 +35,11 @@ void main() {
     expect(shouldReleaseCameraForLifecycle(AppLifecycleState.paused), isTrue);
   });
 
+  test('ブラウザでは未対応のフラッシュ操作を表示しない', () {
+    expect(cameraFlashControlsAvailable(isWeb: true), isFalse);
+    expect(cameraFlashControlsAvailable(isWeb: false), isTrue);
+  });
+
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });

@@ -1,10 +1,10 @@
 # 介護住宅改修 図面・見積アプリ
 
-介護住宅改修向けの図面作成・簡易見積を、Android、iPhone、ブラウザで使えるFlutterアプリにしたものです。
+介護住宅改修向けの図面作成・簡易見積を、スマートフォンとPCのブラウザで使えるFlutter Webアプリです。
 
 ## 主な機能
 
-- 基本情報の入力と端末内への自動保存
+- 基本情報の入力とブラウザ内への自動保存
 - 250mm補助線・500mm主線の方眼図面と、mm単位の内部座標
 - ドラッグによる間取り作成、移動、右下の丸ハンドルによるサイズ変更
 - 間取り・設備の名称を場所名へ統一し、間取り内へ置いた手すり・設備へ場所名を自動設定
@@ -32,7 +32,7 @@
 - 全作図モードでのピンチズーム、スマホ・タブレット・PC対応
 - 選択中のツールを再タップして解除し、通常ドラッグで画面移動
 - 図面の空白をワンタップして選択解除
-- 基本情報、図面、見積内容の端末内自動保存
+- 基本情報、図面、写真、見積内容のブラウザ内自動保存
 
 ## MVPのデータ保存
 
@@ -45,28 +45,29 @@ projects[]
   drawing
     objects
     handrails
+  photos[]
   estimate
 activeProjectId
 ```
 
-- Android / iOS: アプリのDocuments領域に`kaigo_renovation_mvp_v1.json`を保存
-- Web: 同じJSON文書をブラウザのローカル領域へ保存
-- 旧データ: 初回起動時のみ従来のSharedPreferencesデータを読み込み、新形式へ移行
+- Web: 同じJSON文書をブラウザのIndexedDBへ保存
+- 旧Webデータ: 初回起動時のみ従来のlocalStorageデータを読み込み、IndexedDBへ自動移行
+- 保存範囲: 同じブラウザ・同じ公開URLの中だけ。ブラウザデータを消すと案件も消える
 
 読み書きは[`AppDataRepository`](lib/storage/app_data_repository_base.dart)に分離しています。サーバー化するときは、この実装をHTTP API用リポジトリへ差し替え、JSONスキーマをそのままリクエスト・レスポンスに利用できます。
 
-## 起動
+## ブラウザで起動
 
 ```bash
 flutter pub get
-flutter run
+flutter run -d chrome
 ```
 
-接続先を指定する場合:
+配布用ビルドをローカルで確認する場合:
 
 ```bash
-flutter devices
-flutter run -d <device-id>
+npm install
+npm run dev
 ```
 
 ## テストとビルド
@@ -74,15 +75,25 @@ flutter run -d <device-id>
 ```bash
 flutter analyze
 flutter test
-flutter build apk --debug
-flutter build ios --simulator --debug
+flutter test --platform chrome test/web_storage_test.dart
 ./tool/build_web.sh
+npm run deploy:dry-run
 ```
 
 Webビルドでは、以前のPWA版が端末に残したキャッシュを削除する退役用Service Workerも同時に配置します。
 
-## GitHub Pages
+## Cloudflareへ公開
+
+Wranglerへログイン後、次のコマンドでFlutter WebをビルドしてCloudflare Workers Static Assetsへ公開します。
+
+```bash
+npm install
+npx wrangler login
+npm run deploy
+```
+
+SPAフォールバックは`wrangler.jsonc`で設定済みです。将来APIを追加するときは、同じCloudflare環境へWorker、D1、R2を接続できます。
+
+## GitHub Pages（プレビュー）
 
 `main`へpushすると、GitHub Actionsが解析・テスト・Flutter Webビルドを行い、GitHub Pagesへ自動公開します。リポジトリ名に応じた`base-href`もワークフロー内で設定されます。
-
-ストア公開時は、Androidの`applicationId`、iOSのBundle Identifier、署名設定、アプリアイコンを本番用に設定してください。

@@ -1,12 +1,15 @@
 {
     "name": "介護住宅改修 図面・見積",
     "short_name": "住宅改修図面",
+    "id": "./",
     "start_url": ".",
+    "scope": "./",
     "display": "standalone",
-    "background_color": "#F7F9FA",
-    "theme_color": "#1769AA",
+    "background_color": "#F2F2F7",
+    "theme_color": "#007AFF",
     "description": "介護住宅改修の図面作成・簡易見積アプリ",
-    "orientation": "portrait-primary",
+    "lang": "ja",
+    "categories": ["business", "productivity"],
     "prefer_related_applications": false,
     "icons": [
         {

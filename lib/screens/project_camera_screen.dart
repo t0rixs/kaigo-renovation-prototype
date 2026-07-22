@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 @visibleForTesting
@@ -9,6 +10,9 @@ bool shouldReleaseCameraForLifecycle(AppLifecycleState state) =>
     state == AppLifecycleState.paused ||
     state == AppLifecycleState.hidden ||
     state == AppLifecycleState.detached;
+
+@visibleForTesting
+bool cameraFlashControlsAvailable({required bool isWeb}) => !isWeb;
 
 class ProjectCameraScreen extends StatefulWidget {
   const ProjectCameraScreen({super.key});
@@ -101,7 +105,9 @@ class _ProjectCameraScreenState extends State<ProjectCameraScreen>
         enableAudio: false,
       );
       await nextController.initialize();
-      await nextController.setFlashMode(_flashMode);
+      if (cameraFlashControlsAvailable(isWeb: kIsWeb)) {
+        await nextController.setFlashMode(_flashMode);
+      }
       if (_isStaleInitialization(generation)) {
         await _finishStaleInitialization(nextController);
         return;
@@ -215,19 +221,20 @@ class _ProjectCameraScreenState extends State<ProjectCameraScreen>
                     icon: CupertinoIcons.xmark,
                   ),
                 ),
-                Positioned(
-                  right: 12,
-                  top: 8,
-                  child: _CameraControlButton(
-                    tooltip: _flashMode == FlashMode.off
-                        ? 'フラッシュを自動にする'
-                        : 'フラッシュをオフにする',
-                    onPressed: controller == null ? null : _toggleFlash,
-                    icon: _flashMode == FlashMode.off
-                        ? CupertinoIcons.bolt_slash_fill
-                        : CupertinoIcons.bolt_fill,
+                if (cameraFlashControlsAvailable(isWeb: kIsWeb))
+                  Positioned(
+                    right: 12,
+                    top: 8,
+                    child: _CameraControlButton(
+                      tooltip: _flashMode == FlashMode.off
+                          ? 'フラッシュを自動にする'
+                          : 'フラッシュをオフにする',
+                      onPressed: controller == null ? null : _toggleFlash,
+                      icon: _flashMode == FlashMode.off
+                          ? CupertinoIcons.bolt_slash_fill
+                          : CupertinoIcons.bolt_fill,
+                    ),
                   ),
-                ),
                 Align(
                   alignment: Alignment.bottomCenter,
                   child: Padding(

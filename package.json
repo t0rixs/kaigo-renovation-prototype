@@ -1,0 +1,17 @@
+{
+  "name": "kaigo-renovation-web",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:web": "./tool/build_web.sh --base-href /",
+    "dev": "npm run build:web && wrangler dev",
+    "deploy": "npm run build:web && wrangler deploy",
+    "deploy:dry-run": "npm run build:web && wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "wrangler": "^4.113.0"
+  }
+}
