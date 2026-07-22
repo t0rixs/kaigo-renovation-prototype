@@ -440,7 +440,7 @@ void main() {
 
     restored.selectProject(firstProjectId);
     expect(restored.customer.projectName, '保存対象1');
-    expect(restored.objects, hasLength(4));
+    expect(restored.objects, hasLength(3));
     state.dispose();
     restored.dispose();
   });
@@ -461,7 +461,7 @@ void main() {
     expect(project['documents'], isA<Map<String, dynamic>>());
     expect(project['photos'], isA<List<dynamic>>());
     expect(drawing['canvas'], {'widthMm': 10000, 'heightMm': 7500});
-    expect(drawing['objects'], hasLength(4));
+    expect(drawing['objects'], hasLength(3));
     expect(drawing['handrails'], hasLength(1));
     expect(estimate['handrails'], hasLength(1));
     expect(estimate['materialCostTotal'], 5800);
@@ -1236,50 +1236,6 @@ void main() {
     state.dispose();
   });
 
-  testWidgets('窓モードで間取りの縁をタップすると窓を配置できる', (tester) async {
-    tester.view.physicalSize = const Size(390, 844);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final state = AppState();
-    state.addLayout(1000, 1000, 2000, 2000);
-    final room = state.objects.single;
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: AnimatedBuilder(
-            animation: state,
-            builder: (context, _) => DrawingScreen(state: state),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('窓'));
-    await tester.pump();
-    await tester.tap(find.byKey(ValueKey('layout-edge-${room.id}-top')));
-    await tester.pumpAndSettle();
-
-    expect(state.objects, hasLength(2));
-    final window = state.objects.last;
-    expect(window.kind, PlanObjectKind.window);
-    expect(window.wallId, room.id);
-
-    state.select(null);
-    await tester.pump();
-    await tester.tap(find.byKey(ValueKey('object-${window.id}')));
-    await tester.pump();
-    expect(state.selectedId, window.id);
-
-    state.deleteSelected();
-    await tester.pumpAndSettle();
-    expect(state.objects, [room]);
-    state.dispose();
-  });
-
   testWidgets('間取りモードのピンチ操作では間取りを誤作成しない', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -1858,10 +1814,7 @@ void main() {
     state.addToilet(2000, 2250);
     expect(state.objects.last.place, 'トイレ');
 
-    expect(
-      state.addOpening(PlanObjectKind.door, 1500, 2250),
-      OpeningAddResult.added,
-    );
+    expect(state.addDoor(1500, 2250), OpeningAddResult.added);
     expect(state.objects.last.place, 'トイレ');
     expect(outer.toJson(), isNot(contains('label')));
     expect(inner.toJson()['place'], 'トイレ');
@@ -2050,6 +2003,43 @@ void main() {
     state.dispose();
   });
 
+  testWidgets('前面の間取りと重なった設備をタップして選択できる', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AppState();
+    state.addLayout(1000, 1000, 2000, 2000);
+    state.addToilet(2000, 1000);
+    final toilet = state.objects.firstWhere(
+      (object) => object.kind == PlanObjectKind.fixture,
+    );
+    state.addLayout(1000, 1000, 2000, 2000);
+    final frontRoom = state.objects.last;
+    state.moveObjectBy(frontRoom, 250, 0);
+    state.select(null);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: state,
+            builder: (context, _) => DrawingScreen(state: state),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(ValueKey('object-${toilet.id}')));
+    await tester.pump();
+
+    expect(state.selectedId, toilet.id);
+    expect(state.selectedId, isNot(frontRoom.id));
+    state.dispose();
+  });
+
   test('手すりの端点を別の軸へ動かすと横向きと縦向きが切り替わる', () {
     final state = AppState();
     state.addHandrail(1000, 1000, 2000, 1000);
@@ -2152,10 +2142,7 @@ void main() {
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
 
-    expect(
-      state.addOpening(PlanObjectKind.door, 3000, 1500),
-      OpeningAddResult.added,
-    );
+    expect(state.addDoor(3000, 1500), OpeningAddResult.added);
     final door = state.objects.last;
     expect(door.wallId, state.objects.first.id);
     expect(door.wallEdge, WallEdge.right);
@@ -2208,12 +2195,7 @@ void main() {
     final state = AppState();
     state.addLayout(1000, 1000, 2500, 2000);
     expect(
-      state.addOpening(
-        PlanObjectKind.door,
-        2000,
-        1000,
-        doorType: DoorType.sliding,
-      ),
+      state.addDoor(2000, 1000, doorType: DoorType.sliding),
       OpeningAddResult.added,
     );
     final door = state.objects.last;
@@ -2256,7 +2238,7 @@ void main() {
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
     final room = state.objects.first;
-    state.addOpening(PlanObjectKind.door, 3000, 1500);
+    state.addDoor(3000, 1500);
     final door = state.objects.last;
     final originalDoorX = door.xMm;
     final originalDoorY = door.yMm;
@@ -2271,34 +2253,25 @@ void main() {
     state.dispose();
   });
 
-  test('同じ壁区間へドアや窓を重複配置できない', () {
+  test('同じ壁区間へドアを重複配置できない', () {
     final state = AppState();
     state.addLayout(1000, 1000, 3000, 2000);
 
-    expect(
-      state.addOpening(PlanObjectKind.door, 1500, 1000),
-      OpeningAddResult.added,
-    );
-    expect(
-      state.addOpening(PlanObjectKind.window, 1500, 1000),
-      OpeningAddResult.overlaps,
-    );
+    expect(state.addDoor(1500, 1000), OpeningAddResult.added);
+    expect(state.addDoor(1500, 1000), OpeningAddResult.overlaps);
     expect(state.objects, hasLength(2));
 
-    expect(
-      state.addOpening(PlanObjectKind.window, 2000, 1000),
-      OpeningAddResult.added,
-    );
+    expect(state.addDoor(2000, 1000), OpeningAddResult.added);
     expect(state.objects, hasLength(3));
     state.dispose();
   });
 
-  test('ドアや窓の移動と拡大でも他の開口へ重ねられない', () {
+  test('ドアの移動と拡大でも他のドアへ重ねられない', () {
     final state = AppState();
     state.addLayout(1000, 1000, 3000, 2000);
-    state.addOpening(PlanObjectKind.door, 1500, 1000);
+    state.addDoor(1500, 1000);
     final first = state.objects.last;
-    state.addOpening(PlanObjectKind.window, 2500, 1000);
+    state.addDoor(2500, 1000);
     final second = state.objects.last;
     final secondX = second.xMm;
 
@@ -2310,30 +2283,12 @@ void main() {
     state.dispose();
   });
 
-  test('窓を開口幅を保ったまま別の間取りの壁へ移動できる', () {
-    final state = AppState();
-    state.addLayout(1000, 1000, 2000, 2000);
-    final firstRoom = state.objects.first;
-    state.addLayout(4000, 1000, 2000, 2000);
-    final secondRoom = state.objects.last;
-    state.addOpening(PlanObjectKind.window, 2000, 1000);
-    final window = state.objects.last;
-    final originalLength = window.widthMm;
-
-    expect(state.moveOpeningTo(window, 4000, 2000), isTrue);
-    expect(window.wallId, secondRoom.id);
-    expect(window.wallId, isNot(firstRoom.id));
-    expect(window.wallEdge, WallEdge.left);
-    expect(window.heightMm, originalLength);
-    state.dispose();
-  });
-
   test('ドアを反転状態と開口幅を保ったまま別の向きの壁へ移動できる', () {
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
     state.addLayout(4000, 1000, 2000, 2000);
     final secondRoom = state.objects.last;
-    state.addOpening(PlanObjectKind.door, 2000, 1000);
+    state.addDoor(2000, 1000);
     final door = state.objects.last;
     final originalLength = door.widthMm;
     state.flipDoor(door);
@@ -2353,7 +2308,7 @@ void main() {
   test('ドアを同じ壁の内外へ移動すると内開きと外開きが切り替わる', () {
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
-    state.addOpening(PlanObjectKind.door, 2000, 1000);
+    state.addDoor(2000, 1000);
     final door = state.objects.last;
 
     expect(door.opensOutward, isFalse);
@@ -2375,7 +2330,7 @@ void main() {
 
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
-    state.addOpening(PlanObjectKind.door, 2000, 1000);
+    state.addDoor(2000, 1000);
     final door = state.objects.last;
     state.select(null);
 
@@ -2412,61 +2367,6 @@ void main() {
     state.dispose();
   });
 
-  testWidgets('窓を選択後の通常ドラッグで別の間取りの壁へ移動できる', (tester) async {
-    tester.view.physicalSize = const Size(390, 844);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final state = AppState();
-    state.addLayout(1000, 1000, 2000, 2000);
-    state.addLayout(4000, 1000, 2000, 2000);
-    final secondRoom = state.objects.last;
-    state.addOpening(PlanObjectKind.window, 2000, 1000);
-    final window = state.objects.last;
-    state.select(null);
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: AnimatedBuilder(
-            animation: state,
-            builder: (context, _) => DrawingScreen(state: state),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    final windowTarget = find.byKey(ValueKey('object-${window.id}'));
-    final wallTarget = find.byKey(
-      ValueKey('layout-edge-${secondRoom.id}-left'),
-    );
-    final originalWallId = window.wallId;
-    final originalX = window.xMm;
-    final originalY = window.yMm;
-
-    await tester.drag(windowTarget, const Offset(80, 60));
-    await tester.pumpAndSettle();
-    expect(window.wallId, originalWallId);
-    expect(window.xMm, originalX);
-    expect(window.yMm, originalY);
-
-    await tester.tap(windowTarget);
-    await tester.pumpAndSettle();
-    expect(state.selectedId, window.id);
-
-    final gesture = await tester.startGesture(tester.getCenter(windowTarget));
-    await gesture.moveTo(tester.getCenter(wallTarget));
-    await tester.pump();
-    await gesture.up();
-    await tester.pumpAndSettle();
-
-    expect(window.wallId, secondRoom.id);
-    expect(window.wallEdge, WallEdge.left);
-    state.dispose();
-  });
-
   test('ドアの左右反転で描画位置も反転する', () async {
     final normalCenter = await doorInkCenterX(flipped: false);
     final flippedCenter = await doorInkCenterX(flipped: true);
@@ -2478,7 +2378,7 @@ void main() {
   test('ドアを左右反転して元に戻せる', () {
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
-    state.addOpening(PlanObjectKind.door, 3000, 2000);
+    state.addDoor(3000, 2000);
     final door = state.objects.last;
 
     expect(door.flipped, isFalse);
@@ -2500,7 +2400,7 @@ void main() {
 
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
-    state.addOpening(PlanObjectKind.door, 3000, 2000);
+    state.addDoor(3000, 2000);
     final door = state.objects.last;
 
     await tester.pumpWidget(
@@ -2529,7 +2429,7 @@ void main() {
 
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
-    state.addOpening(PlanObjectKind.door, 3000, 2000);
+    state.addDoor(3000, 2000);
     final door = state.objects.last;
     state.flipDoor(door);
 
@@ -2569,7 +2469,7 @@ void main() {
 
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
-    state.addOpening(PlanObjectKind.door, 2000, 1000);
+    state.addDoor(2000, 1000);
     final door = state.objects.last;
 
     await tester.pumpWidget(
@@ -2600,12 +2500,7 @@ void main() {
 
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
-    state.addOpening(
-      PlanObjectKind.door,
-      2000,
-      1000,
-      doorType: DoorType.sliding,
-    );
+    state.addDoor(2000, 1000, doorType: DoorType.sliding);
     final door = state.objects.last;
 
     await tester.pumpWidget(
@@ -2628,12 +2523,12 @@ void main() {
     state.dispose();
   });
 
-  test('間取りの縮小でドアと窓が重なる場合はサイズを変更しない', () {
+  test('間取りの縮小でドア同士が重なる場合はサイズを変更しない', () {
     final state = AppState();
     state.addLayout(1000, 1000, 3000, 2000);
     final room = state.objects.first;
-    state.addOpening(PlanObjectKind.door, 1500, 1000);
-    state.addOpening(PlanObjectKind.window, 3500, 1000);
+    state.addDoor(1500, 1000);
+    state.addDoor(3500, 1000);
     final originalWidth = room.widthMm;
     final openingPositions = state.objects
         .where((item) => item.isWallAttached)
@@ -2752,32 +2647,11 @@ void main() {
     state.dispose();
   });
 
-  test('窓だけを削除しても間取りと設備は残る', () {
-    final state = AppState();
-    state.addLayout(1000, 1000, 2000, 2000);
-    final room = state.objects.first;
-    state.addToilet(2000, 2000);
-    final toilet = state.objects.last;
-    state.addOpening(PlanObjectKind.window, 2000, 1000);
-    final window = state.objects.last;
-
-    state.select(window.id);
-    state.deleteSelected();
-
-    expect(
-      state.objects.map((item) => item.id),
-      containsAll([room.id, toilet.id]),
-    );
-    expect(state.objects.map((item) => item.id), isNot(contains(window.id)));
-    expect(state.objects, hasLength(2));
-    state.dispose();
-  });
-
   test('ドアだけを削除して元に戻せる', () {
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
     final room = state.objects.first;
-    state.addOpening(PlanObjectKind.door, 3000, 2000);
+    state.addDoor(3000, 2000);
     final door = state.objects.last;
 
     state.select(door.id);
@@ -2792,14 +2666,13 @@ void main() {
     state.dispose();
   });
 
-  test('間取りを削除した場合だけ所属するドアと窓も削除する', () {
+  test('間取りを削除した場合だけ所属するドアも削除する', () {
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
     final room = state.objects.first;
     state.addToilet(2000, 2000);
     final toilet = state.objects.last;
-    state.addOpening(PlanObjectKind.door, 3000, 2000);
-    state.addOpening(PlanObjectKind.window, 2000, 1000);
+    state.addDoor(3000, 2000);
 
     state.select(room.id);
     state.deleteSelected();
@@ -2810,21 +2683,21 @@ void main() {
     state.dispose();
   });
 
-  test('トイレ設備だけを削除しても間取りと窓は残る', () {
+  test('トイレ設備だけを削除しても間取りとドアは残る', () {
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
     final room = state.objects.first;
     state.addToilet(2000, 2000);
     final toilet = state.objects.last;
-    state.addOpening(PlanObjectKind.window, 2000, 1000);
-    final window = state.objects.last;
+    state.addDoor(2000, 1000);
+    final door = state.objects.last;
 
     state.select(toilet.id);
     state.deleteSelected();
 
     expect(
       state.objects.map((item) => item.id),
-      containsAll([room.id, window.id]),
+      containsAll([room.id, door.id]),
     );
     expect(state.objects.map((item) => item.id), isNot(contains(toilet.id)));
     expect(state.objects, hasLength(2));
@@ -2849,10 +2722,7 @@ void main() {
   test('手すりは近くの壁やドアに影響されず指定した長さで配置される', () {
     final state = AppState();
     state.addLayout(1000, 1000, 3000, 3000);
-    expect(
-      state.addOpening(PlanObjectKind.door, 2500, 1000),
-      OpeningAddResult.added,
-    );
+    expect(state.addDoor(2500, 1000), OpeningAddResult.added);
     state.addHandrail(1250, 1250, 3750, 1250);
 
     final line = state.lines.single;
@@ -2866,10 +2736,7 @@ void main() {
     state.addLayout(1000, 1000, 3000, 3000);
     state.addHandrail(1250, 1250, 2750, 1250);
 
-    expect(
-      state.addOpening(PlanObjectKind.door, 2000, 1000),
-      OpeningAddResult.added,
-    );
+    expect(state.addDoor(2000, 1000), OpeningAddResult.added);
     expect(
       state.objects.where((object) => object.kind == PlanObjectKind.door),
       hasLength(1),
@@ -2954,7 +2821,7 @@ void main() {
     state.dispose();
   });
 
-  testWidgets('前面へ移動した間取りよりドアを後に描画する', (tester) async {
+  testWidgets('前面へ移動した間取りより手すり・設備・ドアを後に描画する', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -2963,10 +2830,9 @@ void main() {
     final state = AppState();
     state.addLayout(1000, 1000, 2000, 2000);
     final roomWithDoor = state.objects.single;
-    expect(
-      state.addOpening(PlanObjectKind.door, 1500, 1000),
-      OpeningAddResult.added,
-    );
+    expect(state.addDoor(1500, 1000), OpeningAddResult.added);
+    state.addToilet(1750, 1250);
+    state.addHandrail(1250, 1250, 2250, 1250);
     state.addLayout(1250, 750, 2000, 2000);
     state.moveObjectBy(roomWithDoor, 250, 0);
 
@@ -2989,7 +2855,15 @@ void main() {
     final lastLayoutIndex = painters.lastIndexWhere(
       (painter) => painter is LayoutPainter,
     );
+    final handrailIndex = painters.indexWhere(
+      (painter) => painter is PlanPainter,
+    );
+    final toiletIndex = painters.indexWhere(
+      (painter) => painter is ToiletPainter,
+    );
     final doorIndex = painters.indexWhere((painter) => painter is DoorPainter);
+    expect(handrailIndex, greaterThan(lastLayoutIndex));
+    expect(toiletIndex, greaterThan(lastLayoutIndex));
     expect(doorIndex, greaterThan(lastLayoutIndex));
     expect(tester.takeException(), isNull);
     state.dispose();

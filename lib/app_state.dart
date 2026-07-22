@@ -913,8 +913,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  OpeningAddResult addOpening(
-    PlanObjectKind kind,
+  OpeningAddResult addDoor(
     int tapXMm,
     int tapYMm, {
     DoorType doorType = DoorType.swing,
@@ -949,8 +948,8 @@ class AppState extends ChangeNotifier {
       height = opening;
     }
     final item = PlanObject(
-      id: newId(kind.name),
-      kind: kind,
+      id: newId('door'),
+      kind: PlanObjectKind.door,
       place: snap.wall.place.trim(),
       xMm: x,
       yMm: y,
@@ -958,7 +957,7 @@ class AppState extends ChangeNotifier {
       heightMm: height,
       wallId: snap.wall.id,
       wallEdge: snap.edge,
-      doorType: kind == PlanObjectKind.door ? doorType : DoorType.swing,
+      doorType: doorType,
     );
     if (_openingOverlaps(item)) {
       return OpeningAddResult.overlaps;
@@ -1762,17 +1761,6 @@ class AppState extends ChangeNotifier {
         heightMm: 500,
         wallId: room.id,
         wallEdge: WallEdge.right,
-      ),
-      PlanObject(
-        id: newId('window'),
-        kind: PlanObjectKind.window,
-        place: 'トイレ',
-        xMm: 1500,
-        yMm: 750,
-        widthMm: 750,
-        heightMm: 500,
-        wallId: room.id,
-        wallEdge: WallEdge.top,
       ),
     ];
     lines = [

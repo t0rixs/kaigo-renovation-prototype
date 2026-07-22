@@ -11,7 +11,7 @@ import '../models.dart';
 import 'drawing_painters.dart';
 import 'estimate_screen.dart';
 
-enum DrawingTool { layout, rail, equipment, door, window }
+enum DrawingTool { layout, rail, equipment, door }
 
 enum _EquipmentTool { toilet }
 
@@ -188,13 +188,6 @@ class _DrawingScreenState extends State<DrawingScreen> {
           selected: tool == DrawingTool.door,
           onTap: () => _setTool(DrawingTool.door),
         ),
-        _ToolButton(
-          key: const ValueKey('tool-window'),
-          icon: Icons.window_outlined,
-          label: '窓',
-          selected: tool == DrawingTool.window,
-          onTap: () => _setTool(DrawingTool.window),
-        ),
         const VerticalDivider(width: 12, indent: 4, endIndent: 4),
         _ToolButton(
           icon: CupertinoIcons.arrow_uturn_left,
@@ -297,7 +290,6 @@ class _DrawingScreenState extends State<DrawingScreen> {
               null => '配置する設備を選択',
             },
             DrawingTool.door => '${doorTool.label}：間取りの辺付近をタップして配置',
-            DrawingTool.window => '間取りの辺付近をタップして窓を配置',
             null => 'ツール未選択：ドラッグで画面移動',
           };
     return Container(
@@ -351,42 +343,43 @@ class _DrawingScreenState extends State<DrawingScreen> {
                       child: Stack(
                         clipBehavior: Clip.none,
                         children: [
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: PlanPainter(
-                                lines: state.lines,
-                                selectedId: state.selectedId,
-                                mmToPixels: _px,
-                                pathFor: state.handrailPath,
-                                jointPointsFor: state.jointPointsFor,
-                                constructionNumberFor:
-                                    state.constructionNumberFor,
-                                selectionColor: selectionColor,
-                                draft: _draft,
-                              ),
-                            ),
-                          ),
                           ...state.objects
                               .where(
                                 (item) => item.kind == PlanObjectKind.layout,
                               )
                               .expand(_expandedLayoutHitTargets),
-                          ..._selectedExpandedHitTargets(),
                           ...state.objects
                               .where(
-                                (item) =>
-                                    item.kind != PlanObjectKind.door &&
-                                    item.kind != PlanObjectKind.window,
+                                (item) => item.kind == PlanObjectKind.layout,
+                              )
+                              .map(_planObject),
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: PlanPainter(
+                                  lines: state.lines,
+                                  selectedId: state.selectedId,
+                                  mmToPixels: _px,
+                                  pathFor: state.handrailPath,
+                                  jointPointsFor: state.jointPointsFor,
+                                  constructionNumberFor:
+                                      state.constructionNumberFor,
+                                  selectionColor: selectionColor,
+                                  draft: _draft,
+                                ),
+                              ),
+                            ),
+                          ),
+                          ...state.objects
+                              .where(
+                                (item) => item.kind == PlanObjectKind.fixture,
                               )
                               .map(_planObject),
                           ...state.objects
-                              .where(
-                                (item) =>
-                                    item.kind == PlanObjectKind.door ||
-                                    item.kind == PlanObjectKind.window,
-                              )
+                              .where((item) => item.kind == PlanObjectKind.door)
                               .map(_planObject),
                           ...state.lines.expand(_lineHitTargets),
+                          ..._selectedExpandedHitTargets(),
                           if (state.selected is WorkLine)
                             ..._lineControls(state.selected! as WorkLine),
                           ..._selectedSharedWallButtons(),
@@ -629,9 +622,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
           state.addToilet(point.dx.round(), point.dy.round());
         }
       case DrawingTool.door:
-        _addOpening(PlanObjectKind.door, point, doorType: doorTool);
-      case DrawingTool.window:
-        _addOpening(PlanObjectKind.window, point);
+        _addDoor(point, doorType: doorTool);
       case DrawingTool.layout || DrawingTool.rail:
       case null:
         state.select(null);
@@ -639,14 +630,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
     }
   }
 
-  void _addOpening(
-    PlanObjectKind kind,
-    Offset point, {
-    DoorType doorType = DoorType.swing,
-  }) {
+  void _addDoor(Offset point, {DoorType doorType = DoorType.swing}) {
     if (state.selectedId != null) state.select(null);
-    final result = state.addOpening(
-      kind,
+    final result = state.addDoor(
       point.dx.round(),
       point.dy.round(),
       doorType: doorType,
@@ -655,9 +641,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(switch (result) {
-            OpeningAddResult.noWall =>
-              '${kind == PlanObjectKind.door ? 'ドア' : '窓'}は間取りの辺付近に配置してください',
-            OpeningAddResult.overlaps => 'その位置には既にドアまたは窓があります',
+            OpeningAddResult.noWall => 'ドアは間取りの辺付近に配置してください',
+            OpeningAddResult.overlaps => 'その位置には既にドアがあります',
             OpeningAddResult.added => '',
           }),
         ),
@@ -1163,13 +1148,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
       state.addToilet(point.dx.round(), point.dy.round());
       return;
     }
-    if (item.kind == PlanObjectKind.layout &&
-        (tool == DrawingTool.door || tool == DrawingTool.window)) {
-      _addOpening(
-        tool == DrawingTool.door ? PlanObjectKind.door : PlanObjectKind.window,
-        _pointMm(canvasPoint),
-        doorType: doorTool,
-      );
+    if (item.kind == PlanObjectKind.layout && tool == DrawingTool.door) {
+      _addDoor(_pointMm(canvasPoint), doorType: doorTool);
       return;
     }
     state.select(item.id);
@@ -1246,13 +1226,6 @@ class _DrawingScreenState extends State<DrawingScreen> {
         selected: selected,
         flipped: item.flipped,
         doorType: item.doorType,
-        selectionColor: selectionColor,
-      ),
-    ),
-    PlanObjectKind.window => CustomPaint(
-      painter: WindowPainter(
-        edge: item.wallEdge ?? WallEdge.top,
-        selected: selected,
         selectionColor: selectionColor,
       ),
     ),

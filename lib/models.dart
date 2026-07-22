@@ -413,14 +413,13 @@ class HandrailProduct {
       );
 }
 
-enum PlanObjectKind { layout, fixture, door, window }
+enum PlanObjectKind { layout, fixture, door }
 
 extension PlanObjectKindLabel on PlanObjectKind {
   String get label => switch (this) {
     PlanObjectKind.layout => '間取り',
     PlanObjectKind.fixture => '設備',
     PlanObjectKind.door => 'ドア',
-    PlanObjectKind.window => '窓',
   };
 }
 
@@ -545,8 +544,7 @@ class PlanObject {
 
   int get rotationDegrees => (rotationQuarterTurns % 4) * 90;
 
-  bool get isWallAttached =>
-      kind == PlanObjectKind.door || kind == PlanObjectKind.window;
+  bool get isWallAttached => kind == PlanObjectKind.door;
 
   bool get isHorizontalWall =>
       wallEdge == WallEdge.top || wallEdge == WallEdge.bottom;
@@ -572,7 +570,9 @@ class PlanObject {
     id: json['id'] as String? ?? '',
     kind: PlanObjectKind.values.firstWhere(
       (kind) => kind.name == json['kind'],
-      orElse: () => PlanObjectKind.layout,
+      orElse: () => throw FormatException(
+        'Unsupported plan object kind: ${json['kind']}',
+      ),
     ),
     place: ((json['place'] as String?)?.trim().isNotEmpty ?? false)
         ? json['place'] as String
