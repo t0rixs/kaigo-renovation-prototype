@@ -2003,6 +2003,48 @@ void main() {
     state.dispose();
   });
 
+  testWidgets('設備やドアと重なった手すりの選択を最優先する', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = AppState();
+    state.addLayout(1000, 1000, 2000, 2000);
+    state.addToilet(2000, 1500);
+    final toilet = state.objects.last;
+    expect(state.addDoor(1500, 1000), OpeningAddResult.added);
+    final door = state.objects.last;
+    state.addHandrail(1750, 1500, 2250, 1500);
+    final toiletRail = state.lines.last;
+    state.addHandrail(1250, 1000, 1750, 1000);
+    final doorRail = state.lines.last;
+    state.select(toilet.id);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: state,
+            builder: (context, _) => DrawingScreen(state: state),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(ValueKey('line-body-${toiletRail.id}')));
+    await tester.pump();
+    expect(state.selectedId, toiletRail.id);
+
+    state.select(door.id);
+    await tester.pump();
+    await tester.tap(find.byKey(ValueKey('line-body-${doorRail.id}')));
+    await tester.pump();
+    expect(state.selectedId, doorRail.id);
+    state.dispose();
+  });
+
   testWidgets('前面の間取りと重なった設備をタップして選択できる', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -2821,7 +2863,7 @@ void main() {
     state.dispose();
   });
 
-  testWidgets('前面へ移動した間取りより手すり・設備・ドアを後に描画する', (tester) async {
+  testWidgets('グリッド・間取り・設備・ドア・手すりの順に描画する', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -2855,6 +2897,7 @@ void main() {
     final lastLayoutIndex = painters.lastIndexWhere(
       (painter) => painter is LayoutPainter,
     );
+    final gridIndex = painters.indexWhere((painter) => painter is GridPainter);
     final handrailIndex = painters.indexWhere(
       (painter) => painter is PlanPainter,
     );
@@ -2862,11 +2905,50 @@ void main() {
       (painter) => painter is ToiletPainter,
     );
     final doorIndex = painters.indexWhere((painter) => painter is DoorPainter);
-    expect(handrailIndex, greaterThan(lastLayoutIndex));
-    expect(toiletIndex, greaterThan(lastLayoutIndex));
-    expect(doorIndex, greaterThan(lastLayoutIndex));
+    expect(gridIndex, lessThan(lastLayoutIndex));
+    expect(lastLayoutIndex, lessThan(toiletIndex));
+    expect(toiletIndex, lessThan(doorIndex));
+    expect(doorIndex, lessThan(handrailIndex));
     expect(tester.takeException(), isNull);
     state.dispose();
+  });
+
+  test('グリッドと手すり層を合成しても間取り壁が見える', () async {
+    const canvasSize = ui.Size.square(240);
+    const roomSize = ui.Size.square(100);
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+
+    const GridPainter().paint(canvas, canvasSize);
+    canvas.save();
+    canvas.translate(50, 50);
+    const LayoutPainter(
+      selected: false,
+      selectionColor: editorSelectionColor,
+      cutouts: [],
+      wallGaps: [],
+    ).paint(canvas, roomSize);
+    canvas.restore();
+    PlanPainter(
+      lines: const [],
+      selectedId: null,
+      mmToPixels: (value) => value.toDouble(),
+      pathFor: (_) => throw StateError('No handrails in this test'),
+      jointPointsFor: (_) => const [],
+      constructionNumberFor: (_) => '',
+    ).paint(canvas, canvasSize);
+
+    final image = await recorder.endRecording().toImage(240, 240);
+    final bytes = (await image.toByteData(
+      format: ui.ImageByteFormat.rawRgba,
+    ))!.buffer.asUint8List();
+    image.dispose();
+    final offset = (75 * 240 + 50) * 4;
+
+    expect(bytes[offset], lessThan(80));
+    expect(bytes[offset + 1], lessThan(80));
+    expect(bytes[offset + 2], lessThan(80));
+    expect(bytes[offset + 3], greaterThan(200));
   });
 
   test('部分重複では前面の間取りが覆う背面の縁を検出する', () {

@@ -20,6 +20,41 @@ class EditorDraft {
   final Offset end;
 }
 
+class GridPainter extends CustomPainter {
+  const GridPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
+    const minorSize = 40.0;
+    for (double x = 0; x <= size.width; x += minorSize) {
+      final index = (x / minorSize).round();
+      final paint = Paint()
+        ..color = index % 4 == 0
+            ? const Color(0xFF9FB4C2)
+            : index % 2 == 0
+            ? const Color(0xFFC3D1DA)
+            : const Color(0xFFE1E8EC)
+        ..strokeWidth = index % 4 == 0 ? 1.4 : 1;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    }
+    for (double y = 0; y <= size.height; y += minorSize) {
+      final index = (y / minorSize).round();
+      final paint = Paint()
+        ..color = index % 4 == 0
+            ? const Color(0xFF9FB4C2)
+            : index % 2 == 0
+            ? const Color(0xFFC3D1DA)
+            : const Color(0xFFE1E8EC)
+        ..strokeWidth = index % 4 == 0 ? 1.4 : 1;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant GridPainter oldDelegate) => false;
+}
+
 class PlanPainter extends CustomPainter {
   PlanPainter({
     required this.lines,
@@ -43,37 +78,9 @@ class PlanPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = Colors.white);
-    _drawGrid(canvas, size);
     _drawDraft(canvas);
     for (final line in lines) {
       _drawHandrail(canvas, line);
-    }
-  }
-
-  void _drawGrid(Canvas canvas, Size size) {
-    const minorSize = 40.0;
-    for (double x = 0; x <= size.width; x += minorSize) {
-      final index = (x / minorSize).round();
-      final paint = Paint()
-        ..color = index % 4 == 0
-            ? const Color(0xFF9FB4C2)
-            : index % 2 == 0
-            ? const Color(0xFFC3D1DA)
-            : const Color(0xFFE1E8EC)
-        ..strokeWidth = index % 4 == 0 ? 1.4 : 1;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-    }
-    for (double y = 0; y <= size.height; y += minorSize) {
-      final index = (y / minorSize).round();
-      final paint = Paint()
-        ..color = index % 4 == 0
-            ? const Color(0xFF9FB4C2)
-            : index % 2 == 0
-            ? const Color(0xFFC3D1DA)
-            : const Color(0xFFE1E8EC)
-        ..strokeWidth = index % 4 == 0 ? 1.4 : 1;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
     }
   }
 

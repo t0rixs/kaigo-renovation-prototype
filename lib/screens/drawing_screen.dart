@@ -343,6 +343,11 @@ class _DrawingScreenState extends State<DrawingScreen> {
                       child: Stack(
                         clipBehavior: Clip.none,
                         children: [
+                          const Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(painter: GridPainter()),
+                            ),
+                          ),
                           ...state.objects
                               .where(
                                 (item) => item.kind == PlanObjectKind.layout,
@@ -353,6 +358,15 @@ class _DrawingScreenState extends State<DrawingScreen> {
                                 (item) => item.kind == PlanObjectKind.layout,
                               )
                               .map(_planObject),
+                          ...state.objects
+                              .where(
+                                (item) => item.kind == PlanObjectKind.fixture,
+                              )
+                              .map(_planObject),
+                          ...state.objects
+                              .where((item) => item.kind == PlanObjectKind.door)
+                              .map(_planObject),
+                          ..._selectedExpandedHitTargets(),
                           Positioned.fill(
                             child: IgnorePointer(
                               child: CustomPaint(
@@ -370,16 +384,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
                               ),
                             ),
                           ),
-                          ...state.objects
-                              .where(
-                                (item) => item.kind == PlanObjectKind.fixture,
-                              )
-                              .map(_planObject),
-                          ...state.objects
-                              .where((item) => item.kind == PlanObjectKind.door)
-                              .map(_planObject),
                           ...state.lines.expand(_lineHitTargets),
-                          ..._selectedExpandedHitTargets(),
                           if (state.selected is WorkLine)
                             ..._lineControls(state.selected! as WorkLine),
                           ..._selectedSharedWallButtons(),
