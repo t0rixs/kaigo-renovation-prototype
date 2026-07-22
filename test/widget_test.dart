@@ -40,6 +40,14 @@ void main() {
     expect(cameraFlashControlsAvailable(isWeb: false), isTrue);
   });
 
+  test('Webシェルもライト配色だけを宣言する', () {
+    final html = File('web/index.html').readAsStringSync();
+
+    expect(html, contains('name="color-scheme" content="light"'));
+    expect(html, contains('name="supported-color-schemes" content="light"'));
+    expect(html, contains('color-scheme: only light'));
+  });
+
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
