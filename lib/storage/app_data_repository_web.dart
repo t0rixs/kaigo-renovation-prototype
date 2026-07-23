@@ -1,21 +1,15 @@
 import 'package:idb_shim/idb_browser.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_data_repository_base.dart';
 
 class WebAppDataRepository implements AppDataRepository {
-  WebAppDataRepository({
-    this.databaseName = defaultDatabaseName,
-    this.legacyStorageKey = defaultLegacyStorageKey,
-  });
+  WebAppDataRepository({this.databaseName = defaultDatabaseName});
 
   static const defaultDatabaseName = 'kaigo_renovation';
-  static const defaultLegacyStorageKey = 'kaigo_renovation_mvp_json_v1';
   static const _storeName = 'app_data';
   static const _recordKey = 'current';
 
   final String databaseName;
-  final String legacyStorageKey;
 
   @override
   Future<String?> read() async {
@@ -26,17 +20,7 @@ class WebAppDataRepository implements AppDataRepository {
         .getObject(_recordKey);
     await transaction.completed;
     database.close();
-    if (stored is String) return stored;
-
-    // Existing browser installs stored the JSON in localStorage. Move it once
-    // so photos and later project growth are no longer constrained by its
-    // small quota.
-    final preferences = await SharedPreferences.getInstance();
-    final legacyJson = preferences.getString(legacyStorageKey);
-    if (legacyJson == null) return null;
-    await write(legacyJson);
-    await preferences.remove(legacyStorageKey);
-    return legacyJson;
+    return stored is String ? stored : null;
   }
 
   @override

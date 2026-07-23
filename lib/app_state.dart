@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
 import 'storage/app_data_repository.dart';
@@ -18,14 +17,23 @@ typedef WallSnap = ({
 
 typedef LayoutWallOcclusion = ({WallEdge edge, int startMm, int endMm});
 
+typedef _JointPointEntry = ({
+  WorkLine line,
+  HandrailProduct product,
+  bool endpoint,
+  String pointKey,
+  int xMm,
+  int yMm,
+});
+
 enum OpeningAddResult { added, noWall, overlaps }
 
 enum CanvasResizeEdge { top, right, bottom, left }
 
 class AppState extends ChangeNotifier {
-  static const _legacyStorageKey = 'kaigo_renovation_project_v4_handrail';
   static const gridMm = 250;
   static const majorGridMm = 500;
+  static const defaultReinforcementPlatePrice = 5000;
   static const defaultCanvasWidthMm = RenovationProject.defaultCanvasWidthMm;
   static const defaultCanvasHeightMm = RenovationProject.defaultCanvasHeightMm;
 
@@ -37,6 +45,7 @@ class AppState extends ChangeNotifier {
   final AppDataRepository _dataRepository;
 
   List<HandrailProduct> products = defaultHandrailProducts();
+  List<JointProduct> jointProducts = defaultJointProducts();
   String? indoorDefaultProductId = 'demo-indoor-35';
   String? outdoorDefaultProductId = 'demo-outdoor-34';
   List<RenovationProject> projects = [];
@@ -76,11 +85,7 @@ class AppState extends ChangeNotifier {
   int get canvasHeightMm => activeProject.canvasHeightMm;
 
   Future<void> load() async {
-    var raw = await _dataRepository.read();
-    if (raw == null) {
-      final preferences = await SharedPreferences.getInstance();
-      raw = preferences.getString(_legacyStorageKey);
-    }
+    final raw = await _dataRepository.read();
     if (raw == null) {
       addSample(notify: false);
     } else {
@@ -98,6 +103,7 @@ class AppState extends ChangeNotifier {
 
   void _resetData() {
     products = defaultHandrailProducts();
+    jointProducts = defaultJointProducts();
     indoorDefaultProductId = 'demo-indoor-35';
     outdoorDefaultProductId = 'demo-outdoor-34';
     _replaceWithFreshProject();
@@ -153,16 +159,21 @@ class AppState extends ChangeNotifier {
     changed(projectChanged: false);
   }
 
-  RenovationPhotoLocation addPhotoLocation() {
-    final location = RenovationPhotoLocation(
-      id: newId('photo-location'),
-      locationName: '改修場所 ${photoLocations.length + 1}',
-    );
-    photoLocations.add(location);
-    _undoStack.clear();
-    _redoStack.clear();
+  bool movePhotoLocation(
+    RenovationPhotoLocation location, {
+    required int xMm,
+    required int yMm,
+  }) {
+    if (!photoLocations.any((item) => item.id == location.id)) return false;
+    final nextX = snapMm(xMm).clamp(0, canvasWidthMm);
+    final nextY = snapMm(yMm).clamp(0, canvasHeightMm);
+    if (location.xMm == nextX && location.yMm == nextY) return false;
+    location
+      ..xMm = nextX
+      ..yMm = nextY
+      ..positionCustomized = true;
     changed();
-    return location;
+    return true;
   }
 
   bool setProjectPhoto({
@@ -185,18 +196,67 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
-  Map<String, dynamic> toJson() => {
-    'schemaVersion': 1,
-    'productMaster': {
-      'products': products.map((item) => item.toJson()).toList(),
-      'defaults': {
-        'indoorProductId': indoorDefaultProductId,
-        'outdoorProductId': outdoorDefaultProductId,
+  bool clearProjectPhoto({
+    required String projectId,
+    required String locationId,
+    required ProjectPhotoSlot slot,
+  }) {
+    final project = projects.where((item) => item.id == projectId).firstOrNull;
+    final location = project?.photoLocations
+        .where((item) => item.id == locationId)
+        .firstOrNull;
+    if (project == null ||
+        location == null ||
+        location.photoFor(slot) == null) {
+      return false;
+    }
+
+    location.clearPhoto(slot);
+    project.updatedAt = DateTime.now();
+    _undoStack.clear();
+    _redoStack.clear();
+    changed(projectChanged: false);
+    return true;
+  }
+
+  bool setProjectPhotoMemo({
+    required String projectId,
+    required String locationId,
+    required ProjectPhotoSlot slot,
+    required String value,
+  }) {
+    final project = projects.where((item) => item.id == projectId).firstOrNull;
+    final location = project?.photoLocations
+        .where((item) => item.id == locationId)
+        .firstOrNull;
+    if (project == null ||
+        location == null ||
+        location.memoFor(slot) == value) {
+      return false;
+    }
+
+    location.setMemo(slot, value);
+    project.updatedAt = DateTime.now();
+    changed(projectChanged: false);
+    return true;
+  }
+
+  Map<String, dynamic> toJson() {
+    _prepareDerivedProjectData();
+    return {
+      'schemaVersion': 1,
+      'productMaster': {
+        'products': products.map((item) => item.toJson()).toList(),
+        'jointProducts': jointProducts.map((item) => item.toJson()).toList(),
+        'defaults': {
+          'indoorProductId': indoorDefaultProductId,
+          'outdoorProductId': outdoorDefaultProductId,
+        },
       },
-    },
-    'projects': projects.map(_projectToJson).toList(),
-    'activeProjectId': activeProjectId,
-  };
+      'projects': projects.map(_projectToJson).toList(),
+      'activeProjectId': activeProjectId,
+    };
+  }
 
   Map<String, dynamic> _projectToJson(RenovationProject project) {
     final json = project.toJson();
@@ -220,10 +280,18 @@ class AppState extends ChangeNotifier {
             'installationType': line.installationType.name,
             'lengthMm': group.lengthMm,
             'jointCount': cost.jointCount,
+            'endBracketCount': cost.endBracketCount,
+            'intermediateBracketCount': cost.intermediateBracketCount,
+            'connectionJointCount': cost.connectionJointCount,
             'postCount': cost.postCount,
             'railCost': cost.railCost,
             'jointCost': cost.jointCost,
+            'endBracketCost': cost.endBracketCost,
+            'intermediateBracketCost': cost.intermediateBracketCost,
+            'connectionJointCost': cost.connectionJointCost,
             'postCost': cost.postCost,
+            'reinforcementPlateCount': cost.reinforcementPlateCount,
+            'reinforcementPlateCost': cost.reinforcementPlateCost,
             'materialCostTotal': cost.total,
           };
         }).toList();
@@ -239,54 +307,33 @@ class AppState extends ChangeNotifier {
 
   void _restore(String raw) {
     final json = jsonDecode(raw) as Map<String, dynamic>;
-    final schemaVersion = (json['schemaVersion'] as num?)?.toInt() ?? 0;
-    if (schemaVersion > 1) {
+    final schemaVersion = (json['schemaVersion'] as num?)?.toInt();
+    if (schemaVersion != 1) {
       throw const FormatException('Unsupported data schema version');
     }
-    final productMaster = json['productMaster'] as Map<String, dynamic>?;
-    final productSource = productMaster ?? json;
-    final defaults = productMaster?['defaults'] as Map<String, dynamic>?;
-    products = ((productSource['products'] as List<dynamic>?) ?? const [])
+    final productMaster = json['productMaster'] as Map<String, dynamic>;
+    final defaults = productMaster['defaults'] as Map<String, dynamic>;
+    products = (productMaster['products'] as List<dynamic>)
         .map((item) => HandrailProduct.fromJson(item as Map<String, dynamic>))
         .toList();
-    indoorDefaultProductId =
-        defaults?['indoorProductId'] as String? ??
-        json['indoorDefaultProductId'] as String?;
-    outdoorDefaultProductId =
-        defaults?['outdoorProductId'] as String? ??
-        json['outdoorDefaultProductId'] as String?;
+    jointProducts = (productMaster['jointProducts'] as List<dynamic>)
+        .map((item) => JointProduct.fromJson(item as Map<String, dynamic>))
+        .toList();
+    indoorDefaultProductId = defaults['indoorProductId'] as String?;
+    outdoorDefaultProductId = defaults['outdoorProductId'] as String?;
     _ensureDefaultProductsValid();
 
-    final storedProjects = json['projects'] as List<dynamic>?;
-    if (storedProjects == null) {
-      projects = [
-        RenovationProject(
-          id: newId('project'),
-          customer: CustomerInfo.fromJson(
-            json['customer'] as Map<String, dynamic>? ?? const {},
-          ),
-          objects: ((json['objects'] as List<dynamic>?) ?? const [])
-              .map((item) => PlanObject.fromJson(item as Map<String, dynamic>))
-              .toList(),
-          lines: ((json['lines'] as List<dynamic>?) ?? const [])
-              .map((item) => WorkLine.fromJson(item as Map<String, dynamic>))
-              .toList(),
-          updatedAt: DateTime.now(),
-        ),
-      ];
-    } else {
-      projects = storedProjects
-          .map(
-            (item) => RenovationProject.fromJson(item as Map<String, dynamic>),
-          )
-          .toList();
-      if (projects.isEmpty) _replaceWithFreshProject();
+    projects = (json['projects'] as List<dynamic>)
+        .map((item) => RenovationProject.fromJson(item as Map<String, dynamic>))
+        .toList();
+    if (projects.isEmpty) {
+      throw const FormatException('At least one project is required');
     }
-    final storedActiveProjectId = json['activeProjectId'] as String?;
-    activeProjectId =
-        projects.any((project) => project.id == storedActiveProjectId)
-        ? storedActiveProjectId
-        : projects.first.id;
+    final storedActiveProjectId = json['activeProjectId'] as String;
+    if (!projects.any((project) => project.id == storedActiveProjectId)) {
+      throw const FormatException('Active project does not exist');
+    }
+    activeProjectId = storedActiveProjectId;
 
     for (final project in projects) {
       for (final line in project.lines) {
@@ -341,6 +388,7 @@ class AppState extends ChangeNotifier {
   }
 
   void changed({bool projectChanged = true}) {
+    _prepareDerivedProjectData();
     if (projectChanged && projects.isNotEmpty) {
       activeProject.updatedAt = DateTime.now();
     }
@@ -806,14 +854,14 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  void addToilet(int centerXMm, int centerYMm) {
+  void addFixture(FixtureType type, int centerXMm, int centerYMm) {
     checkpoint();
-    const width = 500;
-    const height = 1000;
+    final width = math.min(type.defaultWidthMm, canvasWidthMm);
+    final height = math.min(type.defaultHeightMm, canvasHeightMm);
     final item = PlanObject(
-      id: newId('toilet'),
+      id: newId(type.name),
       kind: PlanObjectKind.fixture,
-      fixture: 'toilet',
+      fixture: type.name,
       place: placeNameAt(centerXMm, centerYMm),
       xMm: snapMm(centerXMm - width / 2).clamp(0, canvasWidthMm - width),
       yMm: snapMm(centerYMm - height / 2).clamp(0, canvasHeightMm - height),
@@ -824,6 +872,9 @@ class AppState extends ChangeNotifier {
     selectedId = item.id;
     changed();
   }
+
+  void addToilet(int centerXMm, int centerYMm) =>
+      addFixture(FixtureType.toilet, centerXMm, centerYMm);
 
   WallSnap? nearestWall(int xMm, int yMm, {int maxDistanceMm = 500}) {
     WallSnap? best;
@@ -1090,15 +1141,15 @@ class AppState extends ChangeNotifier {
     changed();
   }
 
-  void rotateToilet(PlanObject item) {
-    if (item.kind != PlanObjectKind.fixture || item.fixture != 'toilet') return;
+  void rotateFixture(PlanObject item) {
+    if (item.kind != PlanObjectKind.fixture) return;
     checkpoint();
-    applyToiletRotation(item, item.rotationQuarterTurns + 1);
+    applyFixtureRotation(item, item.rotationQuarterTurns + 1);
     changed();
   }
 
-  void applyToiletRotation(PlanObject item, int quarterTurns) {
-    if (item.kind != PlanObjectKind.fixture || item.fixture != 'toilet') return;
+  void applyFixtureRotation(PlanObject item, int quarterTurns) {
+    if (item.kind != PlanObjectKind.fixture) return;
     final target = quarterTurns % 4;
     final current = item.rotationQuarterTurns % 4;
     if (target == current) return;
@@ -1282,11 +1333,9 @@ class AppState extends ChangeNotifier {
   ) {
     final startX = snapMm(x1Mm);
     final startY = snapMm(y1Mm);
-    var endX = snapMm(x2Mm);
-    var endY = snapMm(y2Mm);
-    final horizontal = (endX - startX).abs() > (endY - startY).abs();
-    if (horizontal) {
-      endY = startY;
+    final endX = snapMm(x2Mm);
+    final endY = snapMm(y2Mm);
+    if (startY == endY) {
       final left = math.min(startX, endX);
       final right = math.max(startX, endX);
       return objects.where((item) => item.kind == PlanObjectKind.layout).any((
@@ -1299,7 +1348,7 @@ class AppState extends ChangeNotifier {
       });
     }
 
-    endX = startX;
+    if (startX != endX) return false;
     final top = math.min(startY, endY);
     final bottom = math.max(startY, endY);
     return objects.where((item) => item.kind == PlanObjectKind.layout).any((
@@ -1317,12 +1366,10 @@ class AppState extends ChangeNotifier {
     var endY = snapMm(y2Mm);
     final startX = snapMm(x1Mm);
     final startY = snapMm(y1Mm);
-    if ((endX - startX).abs() > (endY - startY).abs()) {
-      endY = startY;
-      if (endX == startX) endX += gridMm;
-    } else {
-      endX = startX;
-      if (endY == startY) endY += gridMm;
+    if (endX == startX && endY == startY) {
+      endX = startX + gridMm <= canvasWidthMm
+          ? startX + gridMm
+          : startX - gridMm;
     }
     final line = WorkLine(
       id: newId('rail'),
@@ -1362,30 +1409,9 @@ class AppState extends ChangeNotifier {
   void _moveLineEndUnconstrained(WorkLine line, bool start, int xMm, int yMm) {
     final fixedX = start ? line.x2Mm : line.x1Mm;
     final fixedY = start ? line.y2Mm : line.y1Mm;
-    final movingX = start ? line.x1Mm : line.x2Mm;
-    final movingY = start ? line.y1Mm : line.y2Mm;
-    final wasHorizontal = line.isHorizontal;
-    var targetX = snapMm(xMm).clamp(0, canvasWidthMm);
-    var targetY = snapMm(yMm).clamp(0, canvasHeightMm);
-    final dragX = (targetX - movingX).abs();
-    final dragY = (targetY - movingY).abs();
-    final horizontal = math.max(dragX, dragY) < gridMm / 2
-        ? wasHorizontal
-        : dragX > dragY;
-    if (horizontal) {
-      targetY = fixedY;
-      if (targetX == fixedX) {
-        targetX = (fixedX + (start ? -gridMm : gridMm)).clamp(0, canvasWidthMm);
-      }
-    } else {
-      targetX = fixedX;
-      if (targetY == fixedY) {
-        targetY = (fixedY + (start ? -gridMm : gridMm)).clamp(
-          0,
-          canvasHeightMm,
-        );
-      }
-    }
+    final targetX = snapMm(xMm).clamp(0, canvasWidthMm);
+    final targetY = snapMm(yMm).clamp(0, canvasHeightMm);
+    if (targetX == fixedX && targetY == fixedY) return;
     if (start) {
       line.x1Mm = targetX;
       line.y1Mm = targetY;
@@ -1405,9 +1431,23 @@ class AppState extends ChangeNotifier {
     if (line.isHorizontal) {
       final direction = line.x2Mm >= line.x1Mm ? 1 : -1;
       line.x2Mm = (line.x1Mm + direction * snapped).clamp(0, canvasWidthMm);
-    } else {
+    } else if (line.isVertical) {
       final direction = line.y2Mm >= line.y1Mm ? 1 : -1;
       line.y2Mm = (line.y1Mm + direction * snapped).clamp(0, canvasHeightMm);
+    } else {
+      final dx = line.x2Mm - line.x1Mm;
+      final dy = line.y2Mm - line.y1Mm;
+      final currentLength = math.sqrt(dx * dx + dy * dy);
+      final targetX = snapMm(
+        line.x1Mm + dx / currentLength * snapped,
+      ).clamp(0, canvasWidthMm);
+      final targetY = snapMm(
+        line.y1Mm + dy / currentLength * snapped,
+      ).clamp(0, canvasHeightMm);
+      if (targetX != line.x1Mm || targetY != line.y1Mm) {
+        line.x2Mm = targetX;
+        line.y2Mm = targetY;
+      }
     }
   }
 
@@ -1456,6 +1496,26 @@ class AppState extends ChangeNotifier {
   HandrailProduct? productById(String? id) =>
       products.where((product) => product.id == id).firstOrNull;
 
+  JointProduct? jointProductById(String? id) =>
+      jointProducts.where((product) => product.id == id).firstOrNull;
+
+  List<JointProduct> jointProductsForType(JointProductType type) =>
+      jointProducts.where((product) => product.type == type).toList()
+        ..sort((a, b) => a.id.compareTo(b.id));
+
+  List<JointProduct> jointProductsForKind(HandrailConnectionKind kind) =>
+      jointProducts.where((product) => kind.accepts(product.type)).toList()
+        ..sort((a, b) {
+          final typeComparison = a.type.sortOrder.compareTo(b.type.sortOrder);
+          return typeComparison != 0 ? typeComparison : a.id.compareTo(b.id);
+        });
+
+  List<JointProduct> get sortedJointProducts =>
+      jointProducts.toList()..sort((a, b) {
+        final typeComparison = a.type.sortOrder.compareTo(b.type.sortOrder);
+        return typeComparison != 0 ? typeComparison : a.id.compareTo(b.id);
+      });
+
   List<HandrailProduct> productsFor(HandrailEnvironment environment) =>
       products.where((product) => product.supports(environment)).toList();
 
@@ -1471,9 +1531,42 @@ class AppState extends ChangeNotifier {
   }
 
   void _ensureDefaultProductsValid() {
+    if (jointProducts.isEmpty) jointProducts = defaultJointProducts();
     if (products.isEmpty) products = defaultHandrailProducts();
+    for (final product in products) {
+      final outdoorOnly =
+          product.supports(HandrailEnvironment.outdoor) &&
+          !product.supports(HandrailEnvironment.indoor);
+      product.defaultEndBracketId = _validJointDefault(
+        product.defaultEndBracketId,
+        JointProductType.endBracket,
+        preferredId: outdoorOnly ? 'EB-34-OD' : 'EB-35-WH',
+      );
+      product.defaultIntermediateBracketId = _validJointDefault(
+        product.defaultIntermediateBracketId,
+        JointProductType.intermediateBracket,
+        preferredId: outdoorOnly ? 'MB-34-OD' : 'MB-35-WH',
+      );
+      product.defaultLJointId = _validJointDefault(
+        product.defaultLJointId,
+        JointProductType.lShapeConnection,
+        preferredId: 'CJ-L-35',
+      );
+    }
     indoorDefaultProductId = defaultProductIdFor(HandrailEnvironment.indoor);
     outdoorDefaultProductId = defaultProductIdFor(HandrailEnvironment.outdoor);
+  }
+
+  String? _validJointDefault(
+    String? id,
+    JointProductType type, {
+    required String preferredId,
+  }) {
+    final configured = jointProductById(id);
+    if (configured?.type == type) return configured?.id;
+    final preferred = jointProductById(preferredId);
+    if (preferred?.type == type) return preferred?.id;
+    return jointProductsForType(type).firstOrNull?.id;
   }
 
   void setDefaultProduct(HandrailEnvironment environment, String? productId) {
@@ -1495,6 +1588,70 @@ class AppState extends ChangeNotifier {
     _ensureDefaultProductsValid();
     changed(projectChanged: false);
     return true;
+  }
+
+  bool addJointProduct(JointProduct product) {
+    if (jointProducts.any((item) => item.id == product.id)) return false;
+    checkpoint();
+    jointProducts.add(product);
+    _ensureDefaultProductsValid();
+    changed(projectChanged: false);
+    return true;
+  }
+
+  bool isJointProductInUse(JointProduct jointProduct) =>
+      products.any(
+        (product) =>
+            product.defaultEndBracketId == jointProduct.id ||
+            product.defaultIntermediateBracketId == jointProduct.id ||
+            product.defaultLJointId == jointProduct.id,
+      ) ||
+      projects.any(
+        (project) => project.lines.any(
+          (line) =>
+              line.connectionProductOverrides.values.contains(jointProduct.id),
+        ),
+      );
+
+  bool deleteJointProduct(JointProduct jointProduct) {
+    if (isJointProductInUse(jointProduct)) return false;
+    checkpoint();
+    jointProducts.remove(jointProduct);
+    _ensureDefaultProductsValid();
+    changed(projectChanged: false);
+    return true;
+  }
+
+  void updateJointProduct(JointProduct current, JointProduct replacement) {
+    final index = jointProducts.indexWhere((item) => item.id == current.id);
+    if (index < 0) return;
+    checkpoint();
+    replacement.id = current.id;
+    jointProducts[index] = replacement;
+    _ensureDefaultProductsValid();
+    changed(projectChanged: false);
+  }
+
+  void setProductDefaultJoint(
+    HandrailProduct product,
+    JointProductType type,
+    String? jointProductId,
+  ) {
+    final jointProduct = jointProductById(jointProductId);
+    if (jointProduct == null || jointProduct.type != type) return;
+    checkpoint();
+    switch (type) {
+      case JointProductType.endBracket:
+        product.defaultEndBracketId = jointProduct.id;
+      case JointProductType.intermediateBracket:
+        product.defaultIntermediateBracketId = jointProduct.id;
+      case JointProductType.lShapeConnection:
+        product.defaultLJointId = jointProduct.id;
+      case JointProductType.twoDimensionalConnection:
+      case JointProductType.threeDimensionalConnection:
+        return;
+    }
+    changed(projectChanged: false);
   }
 
   bool isProductInUse(HandrailProduct product) => projects.any(
@@ -1616,14 +1773,160 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  Map<String, String> _constructionNumbersForGroups(
+    List<HandrailEstimateGroup> groups,
+  ) {
+    final used = <String>{};
+    final numbers = <String, String>{};
+    var nextAutomaticNumber = 1;
+    for (final group in groups) {
+      var number = group.primary.constructionNumber.trim();
+      if (number.isEmpty || used.contains(number)) {
+        while (used.contains('$nextAutomaticNumber')) {
+          nextAutomaticNumber++;
+        }
+        number = '$nextAutomaticNumber';
+      }
+      used.add(number);
+      numbers[group.id] = number;
+      while (used.contains('$nextAutomaticNumber')) {
+        nextAutomaticNumber++;
+      }
+    }
+    return numbers;
+  }
+
+  void _prepareDerivedProjectData() {
+    for (final project in projects) {
+      final groups = handrailEstimateGroups(
+        projectLines: project.lines,
+        projectObjects: project.objects,
+      );
+      final numbers = _constructionNumbersForGroups(groups);
+      for (final group in groups) {
+        final number = numbers[group.id]!;
+        for (final line in group.lines) {
+          line.constructionNumber = number;
+        }
+      }
+      _syncPhotoLocations(project, groups, numbers);
+    }
+  }
+
+  void _syncPhotoLocations(
+    RenovationProject project,
+    List<HandrailEstimateGroup> groups,
+    Map<String, String> numbers,
+  ) {
+    final available = [...project.photoLocations];
+    final synchronized = <RenovationPhotoLocation>[];
+    for (final group in groups) {
+      final handrailIds = group.lines.map((line) => line.id).toSet();
+      RenovationPhotoLocation? location = available
+          .where(
+            (item) =>
+                item.handrailIds.length == handrailIds.length &&
+                item.handrailIds.toSet().containsAll(handrailIds),
+          )
+          .firstOrNull;
+      location ??= available
+          .where((item) => item.handrailIds.any(handrailIds.contains))
+          .firstOrNull;
+      if (location != null) available.remove(location);
+
+      final anchor = _photoAnchorForGroup(group);
+      location ??= RenovationPhotoLocation(
+        id: 'photo-${group.primary.id}',
+        locationName: '',
+        xMm: anchor.xMm,
+        yMm: anchor.yMm,
+      );
+      location
+        ..handrailIds = handrailIds.toList()
+        ..handrailNumber = numbers[group.id]!;
+      if (!location.positionCustomized) {
+        location
+          ..xMm = anchor.xMm.clamp(0, project.canvasWidthMm)
+          ..yMm = anchor.yMm.clamp(0, project.canvasHeightMm);
+      }
+      final detectedPlace = _projectPlaceNameAt(
+        project,
+        location.xMm,
+        location.yMm,
+      );
+      location.locationName = detectedPlace.isNotEmpty
+          ? detectedPlace
+          : group.primary.place.trim().isEmpty
+          ? '場所未設定'
+          : group.primary.place.trim();
+      synchronized.add(location);
+    }
+    synchronized.sort((a, b) {
+      final aNumber = int.tryParse(a.handrailNumber.trim());
+      final bNumber = int.tryParse(b.handrailNumber.trim());
+      if (aNumber != null && bNumber != null) {
+        return aNumber.compareTo(bNumber);
+      }
+      if (aNumber != null) return -1;
+      if (bNumber != null) return 1;
+      return a.handrailNumber.compareTo(b.handrailNumber);
+    });
+    project.photoLocations
+      ..clear()
+      ..addAll(synchronized);
+  }
+
+  HandrailPoint _photoAnchorForGroup(HandrailEstimateGroup group) {
+    var weightedX = 0.0;
+    var weightedY = 0.0;
+    var totalLength = 0;
+    for (final line in group.lines) {
+      final length = math.max(1, line.lengthMm);
+      weightedX += (line.x1Mm + line.x2Mm) / 2 * length;
+      weightedY += (line.y1Mm + line.y2Mm) / 2 * length;
+      totalLength += length;
+    }
+    return HandrailPoint(
+      snapMm(weightedX / totalLength),
+      snapMm(weightedY / totalLength),
+    );
+  }
+
+  String _projectPlaceNameAt(RenovationProject project, int xMm, int yMm) {
+    final matches =
+        project.objects
+            .where(
+              (object) =>
+                  object.kind == PlanObjectKind.layout &&
+                  xMm >= object.xMm &&
+                  xMm <= object.xMm + object.widthMm &&
+                  yMm >= object.yMm &&
+                  yMm <= object.yMm + object.heightMm,
+            )
+            .toList()
+          ..sort(
+            (a, b) =>
+                (a.widthMm * a.heightMm).compareTo(b.widthMm * b.heightMm),
+          );
+    return matches.firstOrNull?.place.trim() ?? '';
+  }
+
   HandrailEstimateGroup estimateGroupFor(WorkLine line) =>
       handrailEstimateGroups().firstWhere(
         (group) => group.lines.any((component) => component.id == line.id),
         orElse: () => HandrailEstimateGroup([line]),
       );
 
-  String constructionNumberFor(WorkLine line) =>
-      estimateGroupFor(line).primary.constructionNumber;
+  String constructionNumberFor(WorkLine line) {
+    final groups = handrailEstimateGroups();
+    final group = groups.firstWhere(
+      (candidate) =>
+          candidate.lines.any((component) => component.id == line.id),
+      orElse: () => HandrailEstimateGroup([line]),
+    );
+    return _constructionNumbersForGroups(groups)[group.id] ??
+        line.constructionNumber;
+  }
 
   void setConstructionNumberForGroup(WorkLine line, String value) {
     for (final component in estimateGroupFor(line).lines) {
@@ -1634,95 +1937,390 @@ class AppState extends ChangeNotifier {
   List<HandrailPoint> jointPointsFor(
     WorkLine line, {
     List<PlanObject>? projectObjects,
-  }) {
+  }) => _lineConnectionEntries(
+    line,
+  ).map((entry) => HandrailPoint(entry.xMm, entry.yMm)).toList();
+
+  List<_JointPointEntry> _lineConnectionEntries(WorkLine line) {
     final product = productById(line.productId);
     if (product == null || !product.supports(line.environment)) return const [];
-    final interval = math.max(1, product.maxJointIntervalMm);
     final path = handrailPath(line).points;
     if (path.length < 2) return const [];
-    final joints = <HandrailPoint>[path.first];
-    for (var index = 0; index < path.length - 1; index++) {
-      final start = path[index];
-      final end = path[index + 1];
-      final dx = end.xMm - start.xMm;
-      final dy = end.yMm - start.yMm;
-      final length = dx.abs() + dy.abs();
-      if (length == 0) continue;
-      final sectionCount = (length / interval).ceil();
-      for (var section = 1; section <= sectionCount; section++) {
-        final distance = (length * section / sectionCount).round();
-        joints.add(
-          HandrailPoint(
-            start.xMm + dx.sign * distance,
-            start.yMm + dy.sign * distance,
-          ),
-        );
+    final start = path.first;
+    final end = path.last;
+    final dx = end.xMm - start.xMm;
+    final dy = end.yMm - start.yMm;
+    final length = math.sqrt(dx * dx + dy * dy);
+    if (length == 0) return const [];
+    final automaticCount = math.max(
+      0,
+      (length / math.max(1, product.maxJointIntervalMm)).ceil() - 1,
+    );
+    final intermediateCount =
+        line.manualIntermediatePointCount?.clamp(0, 99) ?? automaticCount;
+    return [
+      (
+        line: line,
+        product: product,
+        endpoint: true,
+        pointKey: 'start',
+        xMm: start.xMm,
+        yMm: start.yMm,
+      ),
+      for (var index = 0; index < intermediateCount; index++)
+        (
+          line: line,
+          product: product,
+          endpoint: false,
+          pointKey: 'middle:$index',
+          xMm: (start.xMm + dx * (index + 1) / (intermediateCount + 1)).round(),
+          yMm: (start.yMm + dy * (index + 1) / (intermediateCount + 1)).round(),
+        ),
+      (
+        line: line,
+        product: product,
+        endpoint: true,
+        pointKey: 'end',
+        xMm: end.xMm,
+        yMm: end.yMm,
+      ),
+    ];
+  }
+
+  List<HandrailConnectionPoint> connectionPointsForGroup(
+    HandrailEstimateGroup group,
+  ) {
+    final entriesByPosition = <(int, int), List<_JointPointEntry>>{};
+    final orderedPositions = <(int, int)>[];
+    for (final line in group.lines) {
+      for (final entry in _lineConnectionEntries(line)) {
+        final key = (entry.xMm, entry.yMm);
+        if (!entriesByPosition.containsKey(key)) orderedPositions.add(key);
+        entriesByPosition.putIfAbsent(key, () => []).add(entry);
       }
     }
-    return joints;
+
+    return orderedPositions.map((position) {
+      final entries = entriesByPosition[position]!;
+      final endpointEntries = entries.where((entry) => entry.endpoint).toList();
+      final endpointLineIds = endpointEntries
+          .map((entry) => entry.line.id)
+          .toSet();
+      final kind =
+          endpointLineIds.length >= 2 &&
+              _connectionEntriesChangeDirection(endpointEntries)
+          ? HandrailConnectionKind.connectionJoint
+          : entries.length == 1 && entries.single.endpoint == true
+          ? HandrailConnectionKind.endBracket
+          : HandrailConnectionKind.intermediateBracket;
+
+      JointProduct? selectedProduct;
+      for (final entry in entries) {
+        final line = entry.line;
+        final overrideId = line.connectionProductOverrides[entry.pointKey];
+        final override = jointProductById(overrideId);
+        if (override != null && kind.accepts(override.type)) {
+          selectedProduct = override;
+          break;
+        }
+      }
+      if (selectedProduct == null) {
+        final connectionType = kind == HandrailConnectionKind.connectionJoint
+            ? _connectionEntriesMeetAtRightAngle(endpointEntries)
+                  ? JointProductType.lShapeConnection
+                  : JointProductType.twoDimensionalConnection
+            : null;
+        for (final entry in entries) {
+          final candidate = _defaultJointForKind(
+            entry.product,
+            kind,
+            connectionType: connectionType,
+          );
+          if (candidate != null &&
+              (selectedProduct == null ||
+                  candidate.unitPrice > selectedProduct.unitPrice)) {
+            selectedProduct = candidate;
+          }
+        }
+      }
+
+      final freestandingEntries = entries.where(
+        (entry) =>
+            entry.line.installationType ==
+            HandrailInstallationType.freestanding,
+      );
+      final reinforcementPrices = entries
+          .where(
+            (entry) =>
+                entry.line.reinforcementPlatePrices.containsKey(entry.pointKey),
+          )
+          .map(
+            (entry) => entry.line.reinforcementPlatePrices[entry.pointKey] ?? 0,
+          )
+          .toList();
+      return HandrailConnectionPoint(
+        id: '${position.$1}:${position.$2}',
+        point: HandrailPoint(position.$1, position.$2),
+        kind: kind,
+        jointProduct: selectedProduct,
+        references: entries
+            .map(
+              (entry) => HandrailConnectionReference(
+                lineId: entry.line.id,
+                pointKey: entry.pointKey,
+              ),
+            )
+            .toList(),
+        angleRadians: math.atan2(
+          entries.first.line.y2Mm - entries.first.line.y1Mm,
+          entries.first.line.x2Mm - entries.first.line.x1Mm,
+        ),
+        freestanding: freestandingEntries.isNotEmpty,
+        postPrice: freestandingEntries.fold<int>(
+          0,
+          (highest, entry) => math.max(highest, entry.product.postPrice),
+        ),
+        hasReinforcementPlate: reinforcementPrices.isNotEmpty,
+        reinforcementPlatePrice: reinforcementPrices.fold<int>(0, math.max),
+      );
+    }).toList();
+  }
+
+  bool _connectionEntriesChangeDirection(List<_JointPointEntry> entries) {
+    for (var index = 0; index < entries.length; index++) {
+      final line = entries[index].line;
+      final dx = line.x2Mm - line.x1Mm;
+      final dy = line.y2Mm - line.y1Mm;
+      for (final other in entries.skip(index + 1)) {
+        final otherDx = other.line.x2Mm - other.line.x1Mm;
+        final otherDy = other.line.y2Mm - other.line.y1Mm;
+        if (dx * otherDy - dy * otherDx != 0) return true;
+      }
+    }
+    return false;
+  }
+
+  bool _connectionEntriesMeetAtRightAngle(List<_JointPointEntry> entries) {
+    for (var index = 0; index < entries.length; index++) {
+      final line = entries[index].line;
+      final dx = line.x2Mm - line.x1Mm;
+      final dy = line.y2Mm - line.y1Mm;
+      for (final other in entries.skip(index + 1)) {
+        final otherDx = other.line.x2Mm - other.line.x1Mm;
+        final otherDy = other.line.y2Mm - other.line.y1Mm;
+        if (dx * otherDy - dy * otherDx != 0 &&
+            dx * otherDx + dy * otherDy == 0) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  int intermediatePointCountForGroup(HandrailEstimateGroup group) =>
+      group.lines.fold(
+        0,
+        (total, line) =>
+            total +
+            _lineConnectionEntries(
+              line,
+            ).where((entry) => !entry.endpoint).length,
+      );
+
+  void setIntermediatePointCountForGroup(
+    HandrailEstimateGroup group,
+    int count,
+  ) {
+    final desired = count.clamp(0, 99);
+    final allocations = <String, int>{
+      for (final line in group.lines) line.id: 0,
+    };
+    for (var index = 0; index < desired; index++) {
+      final target = group.lines.reduce((current, candidate) {
+        final currentSpacing =
+            current.lengthMm / ((allocations[current.id] ?? 0) + 1);
+        final candidateSpacing =
+            candidate.lengthMm / ((allocations[candidate.id] ?? 0) + 1);
+        return candidateSpacing > currentSpacing ? candidate : current;
+      });
+      allocations[target.id] = (allocations[target.id] ?? 0) + 1;
+    }
+    checkpoint();
+    for (final line in group.lines) {
+      line.manualIntermediatePointCount = allocations[line.id] ?? 0;
+      line.connectionProductOverrides.removeWhere(
+        (key, _) => key.startsWith('middle:'),
+      );
+      line.reinforcementPlatePrices.removeWhere(
+        (key, _) => key.startsWith('middle:'),
+      );
+    }
+    changed();
+  }
+
+  void resetIntermediatePointsForGroup(HandrailEstimateGroup group) {
+    checkpoint();
+    for (final line in group.lines) {
+      line.manualIntermediatePointCount = null;
+      line.connectionProductOverrides.removeWhere(
+        (key, _) => key.startsWith('middle:'),
+      );
+      line.reinforcementPlatePrices.removeWhere(
+        (key, _) => key.startsWith('middle:'),
+      );
+    }
+    changed();
+  }
+
+  void setConnectionPointReinforcementPlate(
+    HandrailEstimateGroup group,
+    HandrailConnectionPoint point,
+    bool enabled,
+  ) {
+    checkpoint();
+    final references = {
+      for (final reference in point.references) reference.lineId: reference,
+    };
+    for (final line in group.lines) {
+      final reference = references[line.id];
+      if (reference == null) continue;
+      if (enabled) {
+        line.reinforcementPlatePrices.putIfAbsent(
+          reference.pointKey,
+          () => defaultReinforcementPlatePrice,
+        );
+      } else {
+        line.reinforcementPlatePrices.remove(reference.pointKey);
+      }
+    }
+    changed();
+  }
+
+  void setConnectionPointReinforcementPlatePrice(
+    HandrailEstimateGroup group,
+    HandrailConnectionPoint point,
+    int price,
+  ) {
+    if (!point.hasReinforcementPlate) return;
+    checkpoint();
+    final normalizedPrice = price.clamp(0, 999999999);
+    final references = {
+      for (final reference in point.references) reference.lineId: reference,
+    };
+    for (final line in group.lines) {
+      final reference = references[line.id];
+      if (reference == null) continue;
+      line.reinforcementPlatePrices[reference.pointKey] = normalizedPrice;
+    }
+    changed();
+  }
+
+  void setConnectionPointProduct(
+    HandrailEstimateGroup group,
+    HandrailConnectionPoint point,
+    String productId,
+  ) {
+    final product = jointProductById(productId);
+    if (product == null || !point.kind.accepts(product.type)) return;
+    checkpoint();
+    final references = {
+      for (final reference in point.references) reference.lineId: reference,
+    };
+    for (final line in group.lines) {
+      final reference = references[line.id];
+      if (reference != null) {
+        line.connectionProductOverrides[reference.pointKey] = product.id;
+      }
+    }
+    changed();
   }
 
   HandrailCostBreakdown costFor(
     WorkLine line, {
     List<PlanObject>? projectObjects,
-  }) {
-    final product = productById(line.productId);
-    if (product == null || !product.supports(line.environment)) {
-      return const HandrailCostBreakdown(
-        jointCount: 0,
-        postCount: 0,
-        railCost: 0,
-        jointCost: 0,
-        postCost: 0,
-      );
-    }
-    final jointCount = jointPointsFor(
-      line,
-      projectObjects: projectObjects,
-    ).length;
-    final postCount =
-        line.installationType == HandrailInstallationType.freestanding
-        ? jointCount
-        : 0;
-    return HandrailCostBreakdown(
-      jointCount: jointCount,
-      postCount: postCount,
-      railCost: (line.lengthMm / 1000 * product.railPricePerMeter).round(),
-      jointCost: jointCount * product.jointPrice,
-      postCost: postCount * product.postPrice,
-    );
-  }
+  }) => costForGroup(
+    HandrailEstimateGroup([line]),
+    projectObjects: projectObjects,
+  );
 
   HandrailCostBreakdown costForGroup(
     HandrailEstimateGroup group, {
     List<PlanObject>? projectObjects,
   }) {
     var railCost = 0;
-    final jointPrices = <(int, int), int>{};
-    final postPrices = <(int, int), int>{};
     for (final line in group.lines) {
       final product = productById(line.productId);
       if (product == null || !product.supports(line.environment)) continue;
       railCost += (line.lengthMm / 1000 * product.railPricePerMeter).round();
-      for (final point in jointPointsFor(
-        line,
-        projectObjects: projectObjects,
-      )) {
-        final key = (point.xMm, point.yMm);
-        jointPrices[key] = math.max(jointPrices[key] ?? 0, product.jointPrice);
-        if (line.installationType == HandrailInstallationType.freestanding) {
-          postPrices[key] = math.max(postPrices[key] ?? 0, product.postPrice);
-        }
+    }
+
+    final points = connectionPointsForGroup(group);
+    var endBracketCount = 0;
+    var intermediateBracketCount = 0;
+    var connectionJointCount = 0;
+    var endBracketCost = 0;
+    var intermediateBracketCost = 0;
+    var connectionJointCost = 0;
+    var postCount = 0;
+    var postCost = 0;
+    var reinforcementPlateCount = 0;
+    var reinforcementPlateCost = 0;
+
+    for (final point in points) {
+      final price = point.jointProduct?.unitPrice ?? 0;
+      switch (point.kind) {
+        case HandrailConnectionKind.endBracket:
+          endBracketCount++;
+          endBracketCost += price;
+        case HandrailConnectionKind.intermediateBracket:
+          intermediateBracketCount++;
+          intermediateBracketCost += price;
+        case HandrailConnectionKind.connectionJoint:
+          connectionJointCount++;
+          connectionJointCost += price;
+      }
+      if (point.freestanding) {
+        postCount++;
+        postCost += point.postPrice;
+      }
+      if (point.hasReinforcementPlate) {
+        reinforcementPlateCount++;
+        reinforcementPlateCost += point.reinforcementPlatePrice;
       }
     }
     return HandrailCostBreakdown(
-      jointCount: jointPrices.length,
-      postCount: postPrices.length,
+      endBracketCount: endBracketCount,
+      intermediateBracketCount: intermediateBracketCount,
+      connectionJointCount: connectionJointCount,
+      postCount: postCount,
       railCost: railCost,
-      jointCost: jointPrices.values.fold(0, (total, price) => total + price),
-      postCost: postPrices.values.fold(0, (total, price) => total + price),
+      endBracketCost: endBracketCost,
+      intermediateBracketCost: intermediateBracketCost,
+      connectionJointCost: connectionJointCost,
+      postCost: postCost,
+      reinforcementPlateCount: reinforcementPlateCount,
+      reinforcementPlateCost: reinforcementPlateCost,
     );
   }
+
+  JointProduct? _defaultJointForKind(
+    HandrailProduct product,
+    HandrailConnectionKind kind, {
+    JointProductType? connectionType,
+  }) => switch (kind) {
+    HandrailConnectionKind.endBracket => jointProductById(
+      product.defaultEndBracketId,
+    ),
+    HandrailConnectionKind.intermediateBracket => jointProductById(
+      product.defaultIntermediateBracketId,
+    ),
+    HandrailConnectionKind.connectionJoint =>
+      connectionType == JointProductType.lShapeConnection
+          ? jointProductById(product.defaultLJointId)
+          : jointProductsForType(
+              connectionType ?? JointProductType.twoDimensionalConnection,
+            ).firstOrNull,
+  };
 
   int get materialCostTotal => handrailEstimateGroups().fold(
     0,
@@ -1776,6 +2374,7 @@ class AppState extends ChangeNotifier {
       ),
     ];
     selectedId = null;
+    _prepareDerivedProjectData();
     if (notify) changed();
   }
 

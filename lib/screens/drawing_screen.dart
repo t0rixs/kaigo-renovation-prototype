@@ -3,17 +3,17 @@ import 'dart:math' as math;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_state.dart';
 import '../controller_disposal_scope.dart';
 import '../formatters.dart';
 import '../models.dart';
 import 'drawing_painters.dart';
+import 'editor_tool_button.dart';
 import 'estimate_screen.dart';
 
 enum DrawingTool { layout, rail, equipment, door }
-
-enum _EquipmentTool { toilet }
 
 enum _LineDragMode { body, start, end }
 
@@ -37,7 +37,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   late final TextEditingController canvasWidthController;
   late final TextEditingController canvasHeightController;
   DrawingTool? tool;
-  _EquipmentTool? equipmentTool;
+  FixtureType? equipmentTool;
   DoorType doorTool = DoorType.swing;
   bool canvasSettingsActive = false;
   CanvasResizeEdge? canvasResizeEdge;
@@ -51,6 +51,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
   final Set<int> canvasPointers = {};
   bool pointerEditingExisting = false;
   bool multiTouchGestureActive = false;
+  String? connectionEditorGroupId;
+  String? selectedConnectionPointId;
+  final Map<String, String> reinforcementPriceDrafts = {};
 
   List<int>? objectOrigin;
   final Map<String, List<int>> attachedObjectOrigins = {};
@@ -62,6 +65,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   String? objectOriginWallId;
   WallEdge? objectOriginWallEdge;
   bool objectOriginOpensOutward = false;
+  double lastTransformScale = 1;
 
   List<int>? lineOrigin;
   Offset lineDeltaPixels = Offset.zero;
@@ -80,6 +84,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
   Color get selectionColor => editorSelectionColor;
   Size get canvasSize =>
       Size(_px(state.canvasWidthMm), _px(state.canvasHeightMm));
+  HandrailEstimateGroup? get _connectionEditorGroup => state
+      .handrailEstimateGroups()
+      .where((group) => group.id == connectionEditorGroupId)
+      .firstOrNull;
 
   @override
   void initState() {
@@ -104,7 +112,13 @@ class _DrawingScreenState extends State<DrawingScreen> {
   }
 
   void _handleTransformChange() {
-    if (mounted && canvasSettingsActive) setState(() {});
+    final nextScale = scale;
+    final scaleChanged = (nextScale - lastTransformScale).abs() > .001;
+    lastTransformScale = nextScale;
+    if (mounted &&
+        (canvasSettingsActive || (state.selected != null && scaleChanged))) {
+      setState(() {});
+    }
   }
 
   double _px(int mm) => mm / AppState.gridMm * pixelsPerGrid;
@@ -125,11 +139,15 @@ class _DrawingScreenState extends State<DrawingScreen> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final wide = constraints.maxWidth >= 900;
-              if (wide) {
+              final connectionGroup = _connectionEditorGroup;
+              if (wide && connectionGroup != null) {
                 return Row(
                   children: [
                     Expanded(child: _canvas()),
-                    SizedBox(width: 320, child: _propertiesPanel()),
+                    SizedBox(
+                      width: 360,
+                      child: _connectionEditorPanel(connectionGroup),
+                    ),
                   ],
                 );
               }
@@ -146,6 +164,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
     return (base + math.max(0, scaledLabel - 11) * 2).clamp(base, 94);
   }
 
+  double _mobileConnectionEditorHeight() =>
+      math.min(360, MediaQuery.sizeOf(context).height * .42);
+
   Widget _toolbar() => Container(
     height: _toolBarHeight(68),
     decoration: BoxDecoration(
@@ -159,14 +180,14 @@ class _DrawingScreenState extends State<DrawingScreen> {
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 7),
       children: [
-        _ToolButton(
+        EditorToolButton(
           key: const ValueKey('tool-layout'),
           icon: CupertinoIcons.square,
           label: '間取り',
           selected: tool == DrawingTool.layout,
           onTap: () => _setTool(DrawingTool.layout),
         ),
-        _ToolButton(
+        EditorToolButton(
           key: const ValueKey('tool-rail'),
           icon: CupertinoIcons.minus,
           label: '手すり',
@@ -174,14 +195,14 @@ class _DrawingScreenState extends State<DrawingScreen> {
           color: Theme.of(context).colorScheme.error,
           onTap: () => _setTool(DrawingTool.rail),
         ),
-        _ToolButton(
+        EditorToolButton(
           key: const ValueKey('tool-equipment'),
           icon: CupertinoIcons.square_grid_2x2,
           label: '設備',
           selected: tool == DrawingTool.equipment,
           onTap: () => _setTool(DrawingTool.equipment),
         ),
-        _ToolButton(
+        EditorToolButton(
           key: const ValueKey('tool-door'),
           icon: Icons.door_front_door_outlined,
           label: 'ドア',
@@ -189,21 +210,21 @@ class _DrawingScreenState extends State<DrawingScreen> {
           onTap: () => _setTool(DrawingTool.door),
         ),
         const VerticalDivider(width: 12, indent: 4, endIndent: 4),
-        _ToolButton(
+        EditorToolButton(
           icon: CupertinoIcons.arrow_uturn_left,
           label: '元に戻す',
           selected: false,
           enabled: state.canUndo,
           onTap: state.undo,
         ),
-        _ToolButton(
+        EditorToolButton(
           icon: CupertinoIcons.arrow_uturn_right,
           label: 'やり直し',
           selected: false,
           enabled: state.canRedo,
           onTap: state.redo,
         ),
-        _ToolButton(
+        EditorToolButton(
           icon: CupertinoIcons.trash,
           label: '削除',
           selected: false,
@@ -211,7 +232,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
           color: Theme.of(context).colorScheme.error,
           onTap: state.deleteSelected,
         ),
-        _ToolButton(
+        EditorToolButton(
           key: const ValueKey('drawing-settings'),
           icon: CupertinoIcons.gear,
           label: '図面設定',
@@ -235,15 +256,17 @@ class _DrawingScreenState extends State<DrawingScreen> {
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       children: [
-        _ToolButton(
-          key: const ValueKey('equipment-toilet'),
-          iconWidget: _ToiletToolIcon(
-            selected: equipmentTool == _EquipmentTool.toilet,
+        for (final type in FixtureType.values)
+          EditorToolButton(
+            key: ValueKey('equipment-${type.name}'),
+            iconWidget: _FixtureToolIcon(
+              type: type,
+              selected: equipmentTool == type,
+            ),
+            label: type.menuLabel,
+            selected: equipmentTool == type,
+            onTap: () => _setEquipmentTool(type),
           ),
-          label: 'トイレ',
-          selected: equipmentTool == _EquipmentTool.toilet,
-          onTap: () => _setEquipmentTool(_EquipmentTool.toilet),
-        ),
       ],
     ),
   );
@@ -261,14 +284,14 @@ class _DrawingScreenState extends State<DrawingScreen> {
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       children: [
-        _ToolButton(
+        EditorToolButton(
           key: const ValueKey('door-swing'),
           icon: Icons.door_front_door_outlined,
           label: DoorType.swing.label,
           selected: doorTool == DoorType.swing,
           onTap: () => _setDoorTool(DoorType.swing),
         ),
-        _ToolButton(
+        EditorToolButton(
           key: const ValueKey('door-sliding'),
           icon: Icons.door_sliding_outlined,
           label: DoorType.sliding.label,
@@ -284,9 +307,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
         ? '図面サイズ：外周ハンドルをドラッグ、または数値を入力（250mm単位）'
         : switch (tool) {
             DrawingTool.layout => '間取り：空白をドラッグして長方形を作成（250mm単位）',
-            DrawingTool.rail => '手すり：空白をドラッグして縦または横に作成',
+            DrawingTool.rail => '手すり：空白をドラッグして直線を作成',
             DrawingTool.equipment => switch (equipmentTool) {
-              _EquipmentTool.toilet => 'トイレ：配置する中心グリッドをタップ',
+              FixtureType type => '${type.label}：配置する中心グリッドをタップ',
               null => '配置する設備を選択',
             },
             DrawingTool.door => '${doorTool.label}：間取りの辺付近をタップして配置',
@@ -308,89 +331,129 @@ class _DrawingScreenState extends State<DrawingScreen> {
     );
   }
 
-  Widget _canvas() => Stack(
-    children: [
-      Positioned.fill(
-        child: ColoredBox(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          child: InteractiveViewer(
-            key: viewerKey,
-            transformationController: transform,
-            constrained: false,
-            minScale: minimumScale,
-            maxScale: 2.5,
-            boundaryMargin: const EdgeInsets.all(workspaceMargin),
-            panEnabled: !_isDragTool,
-            scaleEnabled: true,
-            onInteractionUpdate: _handleViewerInteractionUpdate,
-            onInteractionEnd: _handleViewerInteractionEnd,
-            child: SizedBox(
-              width: canvasSize.width + workspaceMargin * 2,
-              height: canvasSize.height + workspaceMargin * 2,
-              child: Center(
-                child: Listener(
-                  behavior: HitTestBehavior.opaque,
-                  onPointerDown: _handleCanvasPointerDown,
-                  onPointerMove: _handleCanvasPointerMove,
-                  onPointerUp: _handleCanvasPointerUp,
-                  onPointerCancel: _handleCanvasPointerUp,
-                  child: GestureDetector(
+  Widget _canvas() {
+    final connectionGroup = _connectionEditorGroup;
+    final connectionPoints = state
+        .handrailEstimateGroups()
+        .expand(state.connectionPointsForGroup)
+        .toList();
+    final focusedConnectionPoints = connectionGroup == null
+        ? const <HandrailConnectionPoint>[]
+        : state.connectionPointsForGroup(connectionGroup);
+    final connectionPointNumbers = {
+      for (var index = 0; index < focusedConnectionPoints.length; index++)
+        focusedConnectionPoints[index].id: index + 1,
+    };
+    final focusedIds = connectionGroup?.lines.map((line) => line.id).toSet();
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: ColoredBox(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: InteractiveViewer(
+              key: viewerKey,
+              transformationController: transform,
+              constrained: false,
+              minScale: minimumScale,
+              maxScale: 2.5,
+              boundaryMargin: const EdgeInsets.all(workspaceMargin),
+              panEnabled: !_isDragTool,
+              scaleEnabled: true,
+              onInteractionUpdate: _handleViewerInteractionUpdate,
+              onInteractionEnd: _handleViewerInteractionEnd,
+              child: SizedBox(
+                width: canvasSize.width + workspaceMargin * 2,
+                height: canvasSize.height + workspaceMargin * 2,
+                child: Center(
+                  child: Listener(
                     behavior: HitTestBehavior.opaque,
-                    onTapUp: _handleCanvasTap,
-                    child: SizedBox.fromSize(
-                      key: canvasKey,
-                      size: canvasSize,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          const Positioned.fill(
-                            child: IgnorePointer(
-                              child: CustomPaint(painter: GridPainter()),
+                    onPointerDown: _handleCanvasPointerDown,
+                    onPointerMove: _handleCanvasPointerMove,
+                    onPointerUp: _handleCanvasPointerUp,
+                    onPointerCancel: _handleCanvasPointerUp,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapUp: _handleCanvasTap,
+                      child: SizedBox.fromSize(
+                        key: canvasKey,
+                        size: canvasSize,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            const Positioned.fill(
+                              child: IgnorePointer(
+                                child: CustomPaint(painter: GridPainter()),
+                              ),
                             ),
-                          ),
-                          ...state.objects
-                              .where(
-                                (item) => item.kind == PlanObjectKind.layout,
-                              )
-                              .expand(_expandedLayoutHitTargets),
-                          ...state.objects
-                              .where(
-                                (item) => item.kind == PlanObjectKind.layout,
-                              )
-                              .map(_planObject),
-                          ...state.objects
-                              .where(
-                                (item) => item.kind == PlanObjectKind.fixture,
-                              )
-                              .map(_planObject),
-                          ...state.objects
-                              .where((item) => item.kind == PlanObjectKind.door)
-                              .map(_planObject),
-                          ..._selectedExpandedHitTargets(),
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: CustomPaint(
-                                painter: PlanPainter(
-                                  lines: state.lines,
-                                  selectedId: state.selectedId,
-                                  mmToPixels: _px,
-                                  pathFor: state.handrailPath,
-                                  jointPointsFor: state.jointPointsFor,
-                                  constructionNumberFor:
-                                      state.constructionNumberFor,
-                                  selectionColor: selectionColor,
-                                  draft: _draft,
+                            ...state.objects
+                                .where(
+                                  (item) => item.kind == PlanObjectKind.layout,
+                                )
+                                .expand(_expandedLayoutHitTargets),
+                            ...state.objects
+                                .where(
+                                  (item) => item.kind == PlanObjectKind.layout,
+                                )
+                                .map(_planObject),
+                            ...state.objects
+                                .where(
+                                  (item) => item.kind == PlanObjectKind.fixture,
+                                )
+                                .map(_planObject),
+                            ...state.objects
+                                .where(
+                                  (item) => item.kind == PlanObjectKind.layout,
+                                )
+                                .expand(_layoutLabelLayer),
+                            ...state.objects
+                                .where(
+                                  (item) => item.kind == PlanObjectKind.door,
+                                )
+                                .map(_planObject),
+                            ..._selectedExpandedHitTargets(),
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: CustomPaint(
+                                  painter: PlanPainter(
+                                    lines: state.lines,
+                                    selectedId: state.selectedId,
+                                    mmToPixels: _px,
+                                    pathFor: state.handrailPath,
+                                    connectionPoints: connectionPoints,
+                                    constructionNumberFor:
+                                        state.constructionNumberFor,
+                                    selectionColor: selectionColor,
+                                    focusedHandrailIds: focusedIds ?? const {},
+                                    showConnectionNumbers:
+                                        connectionGroup != null,
+                                    connectionPointNumbers:
+                                        connectionPointNumbers,
+                                    selectedConnectionPointId:
+                                        selectedConnectionPointId,
+                                    draft: _draft,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                          ...state.lines.expand(_lineHitTargets),
-                          if (state.selected is WorkLine)
-                            ..._lineControls(state.selected! as WorkLine),
-                          ..._selectedSharedWallButtons(),
-                          ..._selectedLayoutResizeHandle(),
-                          if (canvasSettingsActive) ..._canvasResizeHandles(),
-                        ],
+                            if (connectionGroup == null)
+                              ...state.lines.expand(_lineHitTargets),
+                            if (connectionGroup != null)
+                              const Positioned.fill(
+                                child: AbsorbPointer(
+                                  child: ColoredBox(color: Colors.transparent),
+                                ),
+                              ),
+                            if (connectionGroup != null)
+                              ..._connectionPointHitTargets(connectionGroup),
+                            if (state.selected is WorkLine &&
+                                connectionGroup == null)
+                              ..._lineControls(state.selected! as WorkLine),
+                            ..._selectedSharedWallButtons(),
+                            ..._selectedLayoutResizeHandle(),
+                            ..._selectedObjectResizeHandle(),
+                            if (canvasSettingsActive) ..._canvasResizeHandles(),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -399,31 +462,46 @@ class _DrawingScreenState extends State<DrawingScreen> {
             ),
           ),
         ),
-      ),
-      if (tool == DrawingTool.equipment)
-        Positioned(top: 0, left: 0, right: 0, child: _equipmentMenu()),
-      if (tool == DrawingTool.door)
-        Positioned(top: 0, left: 0, right: 0, child: _doorMenu()),
-      if (canvasSettingsActive)
-        Positioned(top: 10, left: 10, right: 10, child: _canvasSizePanel()),
-      if (!canvasSettingsActive)
-        Positioned(
-          right: 10,
-          bottom: state.selected == null ? 12 : 72,
-          child: Column(
-            children: [
-              _canvasButton(CupertinoIcons.plus, '拡大', () => _zoom(.18)),
-              const SizedBox(height: 6),
-              _canvasButton(CupertinoIcons.minus, '縮小', () => _zoom(-.18)),
-              const SizedBox(height: 6),
-              _canvasButton(CupertinoIcons.scope, '全体表示', _resetView),
-            ],
+        if (tool == DrawingTool.equipment)
+          Positioned(top: 0, left: 0, right: 0, child: _equipmentMenu()),
+        if (tool == DrawingTool.door)
+          Positioned(top: 0, left: 0, right: 0, child: _doorMenu()),
+        if (canvasSettingsActive)
+          Positioned(top: 10, left: 10, right: 10, child: _canvasSizePanel()),
+        if (!canvasSettingsActive)
+          Positioned(
+            right: 10,
+            bottom: state.selected == null ? 12 : 72,
+            child: Column(
+              children: [
+                _canvasButton(CupertinoIcons.plus, '拡大', () => _zoom(.18)),
+                const SizedBox(height: 6),
+                _canvasButton(CupertinoIcons.minus, '縮小', () => _zoom(-.18)),
+                const SizedBox(height: 6),
+                _canvasButton(CupertinoIcons.scope, '全体表示', _resetView),
+              ],
+            ),
           ),
-        ),
-      if (state.selected != null && MediaQuery.sizeOf(context).width < 900)
-        _selectionBar(),
-    ],
-  );
+        if (state.selected != null && connectionGroup == null) _selectionBar(),
+        if (connectionGroup != null && MediaQuery.sizeOf(context).width < 900)
+          Positioned(
+            left: 8,
+            right: 8,
+            bottom: 0,
+            height: _mobileConnectionEditorHeight(),
+            child: Material(
+              elevation: 10,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(8),
+              ),
+              clipBehavior: Clip.antiAlias,
+              color: Theme.of(context).colorScheme.surface,
+              child: _connectionEditorPanel(connectionGroup),
+            ),
+          ),
+      ],
+    );
+  }
 
   bool get _isDragTool =>
       tool == DrawingTool.layout || tool == DrawingTool.rail;
@@ -473,7 +551,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     }
   }
 
-  void _setEquipmentTool(_EquipmentTool value) {
+  void _setEquipmentTool(FixtureType value) {
     setState(() => equipmentTool = value);
     if (state.selectedId != null) state.select(null);
   }
@@ -623,8 +701,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final point = _pointMm(details.localPosition);
     switch (tool) {
       case DrawingTool.equipment:
-        if (equipmentTool == _EquipmentTool.toilet) {
-          state.addToilet(point.dx.round(), point.dy.round());
+        final type = equipmentTool;
+        if (type != null) {
+          state.addFixture(type, point.dx.round(), point.dy.round());
         }
       case DrawingTool.door:
         _addDoor(point, doorType: doorTool);
@@ -781,12 +860,11 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final padding = _px(AppState.gridMm);
     return [
       for (var index = 0; index < points.length - 1; index++)
-        Positioned.fromRect(
+        _positionedLineSegment(
           key: ValueKey('selected-hit-${line.id}-segment-$index'),
-          rect: _lineSegmentRect(
-            Offset(_px(points[index].xMm), _px(points[index].yMm)),
-            Offset(_px(points[index + 1].xMm), _px(points[index + 1].yMm)),
-          ).inflate(padding),
+          start: Offset(_px(points[index].xMm), _px(points[index].yMm)),
+          end: Offset(_px(points[index + 1].xMm), _px(points[index + 1].yMm)),
+          padding: padding,
           child: _lineDragTarget(
             line,
             _LineDragMode.body,
@@ -817,7 +895,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
               child: _objectVisual(item, selected),
             ),
           ),
-          if (selected)
+          if (selected && item.kind == PlanObjectKind.door)
             Positioned(
               right: 3,
               bottom: 3,
@@ -825,7 +903,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
               height: 32,
               child: _objectGestureTarget(
                 item: item,
-                selected: selected,
+                selected: true,
                 objectSize: rect.size,
                 canvasOrigin: rect.bottomRight - const Offset(35, 35),
                 forceResize: true,
@@ -930,13 +1008,117 @@ class _DrawingScreenState extends State<DrawingScreen> {
                 child: const SizedBox.expand(),
               ),
             ),
-          Positioned(left: 6, top: 4, child: _layoutLabelTarget(item)),
         ],
       ),
     );
   }
 
-  Widget _layoutLabelTarget(PlanObject item) => Listener(
+  List<Widget> _layoutLabelLayer(PlanObject item) {
+    final roomRect = _objectRect(item);
+    final placement = _layoutLabelPlacement(item, roomRect.size);
+    if (placement == null) return const [];
+    return [
+      Positioned(
+        left: roomRect.left + placement.offset.dx,
+        top: roomRect.top + placement.offset.dy,
+        child: _layoutLabelTarget(item, placement.hitSize),
+      ),
+      Positioned(
+        left: roomRect.left + placement.offset.dx,
+        top: roomRect.top + placement.offset.dy,
+        child: IgnorePointer(
+          child: _layoutLabelVisual(item, placement.size, placement.textAlign),
+        ),
+      ),
+    ];
+  }
+
+  ({Offset offset, Size size, Size hitSize, TextAlign textAlign})?
+  _layoutLabelPlacement(PlanObject item, Size roomSize) {
+    const horizontalInset = 6.0;
+    const verticalInset = 4.0;
+    const minimumTarget = 44.0;
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: _objectPlaceName(item),
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+      ),
+      textDirection: Directionality.of(context),
+      maxLines: 1,
+    )..layout(maxWidth: math.max(1, roomSize.width - horizontalInset * 2 - 8));
+    final maximumWidth = math.max(1.0, roomSize.width - horizontalInset * 2);
+    final labelSize = Size(
+      math.min(maximumWidth, textPainter.width + 8),
+      minimumTarget,
+    );
+    final roomIndex = state.objects.indexWhere(
+      (object) => object.id == item.id,
+    );
+    final containedIds = state
+        .containedLayouts(item)
+        .map((room) => room.id)
+        .toSet();
+    final blockers = <Rect>[];
+    for (var index = 0; index < state.objects.length; index++) {
+      final other = state.objects[index];
+      if (other.id == item.id || other.kind != PlanObjectKind.layout) continue;
+      if (index <= roomIndex && !containedIds.contains(other.id)) continue;
+      final localRect = Rect.fromLTWH(
+        _px(other.xMm - item.xMm),
+        _px(other.yMm - item.yMm),
+        _px(other.widthMm),
+        _px(other.heightMm),
+      ).intersect(Offset.zero & roomSize);
+      if (!localRect.isEmpty) blockers.add(localRect);
+    }
+
+    final maxX = math.max(
+      horizontalInset,
+      roomSize.width - labelSize.width - horizontalInset,
+    );
+    final maxY = math.max(
+      verticalInset,
+      roomSize.height - labelSize.height - verticalInset,
+    );
+    final candidates = <({Offset offset, TextAlign textAlign})>[
+      (
+        offset: const Offset(horizontalInset, verticalInset),
+        textAlign: TextAlign.left,
+      ),
+      (offset: Offset(maxX, verticalInset), textAlign: TextAlign.right),
+      (offset: Offset(horizontalInset, maxY), textAlign: TextAlign.left),
+      (offset: Offset(maxX, maxY), textAlign: TextAlign.right),
+    ];
+    const searchStep = 20.0;
+    for (var y = verticalInset; y <= maxY; y += searchStep) {
+      for (var x = horizontalInset; x <= maxX; x += searchStep) {
+        candidates.add((
+          offset: Offset(x, y),
+          textAlign: x > (horizontalInset + maxX) / 2
+              ? TextAlign.right
+              : TextAlign.left,
+        ));
+      }
+    }
+    for (final candidate in candidates) {
+      final offset = candidate.offset;
+      final labelRect = offset & labelSize;
+      if (blockers.every((blocker) => !labelRect.overlaps(blocker))) {
+        return (
+          offset: offset,
+          size: Size(
+            math.max(1, roomSize.width - offset.dx - horizontalInset),
+            labelSize.height,
+          ),
+          hitSize: labelSize,
+          textAlign: candidate.textAlign,
+        );
+      }
+    }
+    return null;
+  }
+
+  Widget _layoutLabelTarget(PlanObject item, Size size) => Listener(
     behavior: HitTestBehavior.opaque,
     onPointerDown: (_) => _suppressCanvasInteraction(),
     onPointerUp: (_) => _releaseCanvasInteraction(),
@@ -945,32 +1127,46 @@ class _DrawingScreenState extends State<DrawingScreen> {
       key: ValueKey('layout-label-${item.id}'),
       behavior: HitTestBehavior.opaque,
       onTap: () => state.select(item.id),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+      child: SizedBox.fromSize(size: size),
+    ),
+  );
+
+  Widget _layoutLabelVisual(PlanObject item, Size size, TextAlign textAlign) =>
+      SizedBox.fromSize(
+        key: ValueKey('layout-label-visual-${item.id}'),
+        size: size,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
           child: Text(
             _objectPlaceName(item),
+            textAlign: textAlign,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
           ),
         ),
-      ),
-    ),
-  );
+      );
+
+  double get _resizeControlScale => scale.clamp(minimumScale, 2.5);
+  double get _resizeHandleHitSize => 48 / _resizeControlScale;
+  double get _resizeDotSize => 18 / _resizeControlScale;
+
+  Rect _resizeHandleRectFor(PlanObject item) {
+    final objectRect = _objectRect(item);
+    final outsideOffset = 8 / _resizeControlScale;
+    return Rect.fromCenter(
+      center: objectRect.bottomRight + Offset(outsideOffset, outsideOffset),
+      width: _resizeHandleHitSize,
+      height: _resizeHandleHitSize,
+    );
+  }
 
   Rect? _selectedLayoutResizeRect() {
     final selected = state.selected;
     if (selected is! PlanObject || selected.kind != PlanObjectKind.layout) {
       return null;
     }
-    const hitSize = 44.0;
-    final rect = _objectRect(selected);
-    return Rect.fromLTWH(
-      rect.right - hitSize,
-      rect.bottom - hitSize,
-      hitSize,
-      hitSize,
-    );
+    return _resizeHandleRectFor(selected);
   }
 
   List<Widget> _selectedLayoutResizeHandle() {
@@ -986,7 +1182,29 @@ class _DrawingScreenState extends State<DrawingScreen> {
           objectSize: _objectRect(selected).size,
           canvasOrigin: handleRect.topLeft,
           forceResize: true,
-          child: Center(child: _resizeDot(selected)),
+          child: Center(child: _resizeDot(selected, size: _resizeDotSize)),
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> _selectedObjectResizeHandle() {
+    final selected = state.selected;
+    if (selected is! PlanObject || selected.kind != PlanObjectKind.fixture) {
+      return const [];
+    }
+    final handleRect = _resizeHandleRectFor(selected);
+    return [
+      Positioned.fromRect(
+        key: ValueKey('resize-hit-${selected.id}'),
+        rect: handleRect,
+        child: _objectGestureTarget(
+          item: selected,
+          selected: true,
+          objectSize: _objectRect(selected).size,
+          canvasOrigin: handleRect.topLeft,
+          forceResize: true,
+          child: Center(child: _resizeDot(selected, size: _resizeDotSize)),
         ),
       ),
     ];
@@ -1148,9 +1366,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (multiTouchGestureActive) return;
     if (item.kind == PlanObjectKind.layout &&
         tool == DrawingTool.equipment &&
-        equipmentTool == _EquipmentTool.toilet) {
+        equipmentTool != null) {
       final point = _pointMm(canvasPoint);
-      state.addToilet(point.dx.round(), point.dy.round());
+      state.addFixture(equipmentTool!, point.dx.round(), point.dy.round());
       return;
     }
     if (item.kind == PlanObjectKind.layout && tool == DrawingTool.door) {
@@ -1179,10 +1397,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
     return box?.globalToLocal(globalPosition) ?? Offset.zero;
   }
 
-  Widget _resizeDot(PlanObject item) => Container(
+  Widget _resizeDot(PlanObject item, {double? size}) => Container(
     key: ValueKey('resize-${item.id}'),
-    width: 28,
-    height: 28,
+    width: size ?? 28,
+    height: size ?? 28,
     decoration: BoxDecoration(
       color: selectionColor,
       shape: BoxShape.circle,
@@ -1218,8 +1436,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
       ),
     ),
     PlanObjectKind.fixture => CustomPaint(
-      key: ValueKey('toilet-symbol-${item.id}'),
-      painter: ToiletPainter(
+      key: ValueKey('${item.fixture}-symbol-${item.id}'),
+      painter: FixturePainter(
+        type: item.fixtureType ?? FixtureType.toilet,
         selected: selected,
         rotationQuarterTurns: item.rotationQuarterTurns,
         selectionColor: selectionColor,
@@ -1349,16 +1568,14 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final points = state.handrailPath(line).points;
     return [
       for (var index = 0; index < points.length - 1; index++)
-        Positioned.fromRect(
+        _positionedLineSegment(
           key: ValueKey(
             index == 0
                 ? 'line-body-${line.id}'
                 : 'line-body-${line.id}-segment-$index',
           ),
-          rect: _lineSegmentRect(
-            Offset(_px(points[index].xMm), _px(points[index].yMm)),
-            Offset(_px(points[index + 1].xMm), _px(points[index + 1].yMm)),
-          ),
+          start: Offset(_px(points[index].xMm), _px(points[index].yMm)),
+          end: Offset(_px(points[index + 1].xMm), _px(points[index + 1].yMm)),
           child: _lineDragTarget(
             line,
             _LineDragMode.body,
@@ -1368,22 +1585,46 @@ class _DrawingScreenState extends State<DrawingScreen> {
     ];
   }
 
-  Rect _lineSegmentRect(Offset start, Offset end) {
-    final left = math.min(start.dx, end.dx);
-    final top = math.min(start.dy, end.dy);
-    return start.dy == end.dy
-        ? Rect.fromLTWH(
-            left,
-            start.dy - 20,
-            math.max(40, (end.dx - start.dx).abs()),
-            40,
-          )
-        : Rect.fromLTWH(
-            start.dx - 20,
-            top,
-            40,
-            math.max(40, (end.dy - start.dy).abs()),
-          );
+  Widget _positionedLineSegment({
+    Key? key,
+    required Offset start,
+    required Offset end,
+    required Widget child,
+    double padding = 0,
+  }) {
+    final center = Offset.lerp(start, end, .5)!;
+    final length = math.max(40.0, (end - start).distance) + padding * 2;
+    final height = 40.0 + padding * 2;
+    return Positioned(
+      key: key,
+      left: center.dx - length / 2,
+      top: center.dy - height / 2,
+      width: length,
+      height: height,
+      child: Transform.rotate(
+        angle: math.atan2(end.dy - start.dy, end.dx - start.dx),
+        child: child,
+      ),
+    );
+  }
+
+  Iterable<Widget> _connectionPointHitTargets(
+    HandrailEstimateGroup group,
+  ) sync* {
+    for (final point in state.connectionPointsForGroup(group)) {
+      final center = Offset(_px(point.point.xMm), _px(point.point.yMm));
+      yield Positioned(
+        key: ValueKey('connection-point-hit-${point.id}'),
+        left: center.dx - 22,
+        top: center.dy - 22,
+        width: 44,
+        height: 44,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() => selectedConnectionPointId = point.id),
+        ),
+      );
+    }
   }
 
   List<Widget> _lineControls(WorkLine line) {
@@ -1392,11 +1633,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final end = Offset(_px(points.last.xMm), _px(points.last.yMm));
     return [
       for (var index = 0; index < points.length - 1; index++)
-        Positioned.fromRect(
-          rect: _lineSegmentRect(
-            Offset(_px(points[index].xMm), _px(points[index].yMm)),
-            Offset(_px(points[index + 1].xMm), _px(points[index + 1].yMm)),
-          ),
+        _positionedLineSegment(
+          start: Offset(_px(points[index].xMm), _px(points[index].yMm)),
+          end: Offset(_px(points[index + 1].xMm), _px(points[index + 1].yMm)),
           child: _lineDragTarget(
             line,
             _LineDragMode.body,
@@ -1573,11 +1812,19 @@ class _DrawingScreenState extends State<DrawingScreen> {
                     onPressed: () => state.flipDoor(selected),
                     icon: const Icon(CupertinoIcons.arrow_left_right),
                   ),
-                if (selected is PlanObject && selected.fixture == 'toilet')
+                if (selected is PlanObject &&
+                    selected.kind == PlanObjectKind.fixture)
                   IconButton(
-                    tooltip: 'トイレを90度回転',
-                    onPressed: () => state.rotateToilet(selected),
+                    tooltip: '設備を90度回転',
+                    onPressed: () => state.rotateFixture(selected),
                     icon: const Icon(CupertinoIcons.rotate_right),
+                  ),
+                if (selected is WorkLine)
+                  IconButton(
+                    key: const ValueKey('open-connection-editor-compact'),
+                    tooltip: '接続点を編集',
+                    onPressed: () => _openConnectionEditor(selected),
+                    icon: const Icon(Icons.hub_outlined),
                   ),
                 IconButton(
                   tooltip: '属性を編集',
@@ -1609,7 +1856,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final doorState = item.kind == PlanObjectKind.door
         ? ' / ${_doorStateLabel(item)}'
         : '';
-    final rotation = item.fixture == 'toilet'
+    final rotation = item.kind == PlanObjectKind.fixture
         ? ' / ${item.rotationDegrees}°'
         : '';
     return '${_objectTypeName(item)}  ${_objectPlaceName(item)}  '
@@ -1625,123 +1872,408 @@ class _DrawingScreenState extends State<DrawingScreen> {
     return horizontal ? '右引き' : '下引き';
   }
 
-  String _objectTypeName(PlanObject item) => item.fixture == 'toilet'
-      ? 'トイレ'
-      : item.kind == PlanObjectKind.door
-      ? item.doorType.label
-      : item.kind.label;
+  String _objectTypeName(PlanObject item) =>
+      item.fixtureType?.label ??
+      (item.kind == PlanObjectKind.door
+          ? item.doorType.label
+          : item.kind.label);
 
   String _objectPlaceName(PlanObject item) => item.place.trim().isEmpty
       ? (item.kind == PlanObjectKind.layout ? '間取り' : '場所未設定')
       : item.place.trim();
 
   String _handrailSelectedLabel(WorkLine line) {
-    final cost = state.costFor(line);
-    return 'No.${state.constructionNumberFor(line)} 手すり  ${line.lengthMm}mm / '
-        '${line.installationType.label} / ジョイント${cost.jointCount}個'
+    final group = state.estimateGroupFor(line);
+    final cost = state.costForGroup(group);
+    return 'No.${state.constructionNumberFor(line)} 手すり  ${group.lengthMm}mm / '
+        '${line.installationType.label} / '
+        '端部${cost.endBracketCount}個・中受${cost.intermediateBracketCount}個'
+        '${cost.connectionJointCount > 0 ? '・接続${cost.connectionJointCount}個' : ''}'
         '${cost.postCount > 0 ? '・柱${cost.postCount}本' : ''}  '
+        '${cost.reinforcementPlateCount > 0 ? '・補強板${cost.reinforcementPlateCount}枚' : ''}  '
         '${formatYen(cost.total)}';
   }
 
-  Widget _propertiesPanel() {
-    final selected = state.selected;
+  void _openConnectionEditor(WorkLine line) {
+    final group = state.estimateGroupFor(line);
+    setState(() {
+      tool = null;
+      equipmentTool = null;
+      canvasSettingsActive = false;
+      connectionEditorGroupId = group.id;
+      selectedConnectionPointId = null;
+      reinforcementPriceDrafts.clear();
+    });
+    state.select(group.primary.id);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && connectionEditorGroupId == group.id) {
+        _focusConnectionGroup(group);
+      }
+    });
+  }
+
+  void _focusConnectionGroup(HandrailEstimateGroup group) {
+    final viewport =
+        (viewerKey.currentContext?.findRenderObject() as RenderBox?)?.size;
+    if (viewport == null) return;
+    final points = group.lines
+        .expand((line) => state.handrailPath(line).points)
+        .toList();
+    if (points.isEmpty) return;
+
+    final minX = points.map((point) => point.xMm).reduce(math.min);
+    final maxX = points.map((point) => point.xMm).reduce(math.max);
+    final minY = points.map((point) => point.yMm).reduce(math.min);
+    final maxY = points.map((point) => point.yMm).reduce(math.max);
+    final mobile = MediaQuery.sizeOf(context).width < 900;
+    final visibleHeight = math.max(
+      140.0,
+      viewport.height - (mobile ? _mobileConnectionEditorHeight() : 0),
+    );
+    final contentWidth = math.max(80.0, _px(maxX - minX) + 80);
+    final contentHeight = math.max(80.0, _px(maxY - minY) + 80);
+    final targetScale = math
+        .min(
+          (viewport.width - 32) / contentWidth,
+          (visibleHeight - 24) / contentHeight,
+        )
+        .clamp(minimumScale, 1.1);
+    final contentCenter = Offset(
+      workspaceMargin + _px((minX + maxX) ~/ 2),
+      workspaceMargin + _px((minY + maxY) ~/ 2),
+    );
+    final visibleCenter = Offset(viewport.width / 2, visibleHeight / 2);
+    final translation = visibleCenter - contentCenter * targetScale;
+    transform.value = Matrix4.diagonal3Values(targetScale, targetScale, 1)
+      ..setTranslationRaw(translation.dx, translation.dy, 0);
+  }
+
+  void _closeConnectionEditor() {
+    setState(() {
+      connectionEditorGroupId = null;
+      selectedConnectionPointId = null;
+      reinforcementPriceDrafts.clear();
+    });
+  }
+
+  Widget _connectionEditorPanel(HandrailEstimateGroup group) {
+    final points = state.connectionPointsForGroup(group);
+    final intermediateCount = state.intermediatePointCountForGroup(group);
+    final manual = group.lines.any(
+      (line) => line.manualIntermediatePointCount != null,
+    );
     return Material(
+      key: const ValueKey('connection-editor-panel'),
       color: Theme.of(context).colorScheme.surface,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text(
-            '属性',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 12),
-          if (selected == null)
+      child: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '接続点編集',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  key: const ValueKey('close-connection-editor'),
+                  tooltip: '閉じる',
+                  onPressed: _closeConnectionEditor,
+                  icon: const Icon(CupertinoIcons.xmark),
+                ),
+              ],
+            ),
             Text(
-              '図面上のオブジェクトを選択してください',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            )
-          else ...[
-            Text(
-              _selectedLabel(selected),
+              'No.${state.constructionNumberFor(group.primary)}  '
+              '${state.handrailPlace(group.primary)}',
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _editSelected,
-              icon: const Icon(Icons.tune),
-              label: const Text('属性を編集'),
+            const SizedBox(height: 4),
+            Text(
+              '${group.lines.length}本の手すりをまとめて選択中  /  '
+              '接続点 ${points.length}個',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
-            if (selected is PlanObject &&
-                selected.kind == PlanObjectKind.door) ...[
-              const SizedBox(height: 8),
-              if (selected.doorType == DoorType.swing) ...[
-                OutlinedButton.icon(
-                  onPressed: () => state.toggleDoorOpeningSide(selected),
-                  icon: const Icon(Icons.compare_arrows),
-                  label: Text(selected.opensOutward ? '内開きに変更' : '外開きに変更'),
-                ),
-                const SizedBox(height: 8),
-              ],
-              OutlinedButton.icon(
-                onPressed: () => state.flipDoor(selected),
-                icon: Icon(
-                  selected.doorType == DoorType.swing
-                      ? Icons.flip
-                      : Icons.swap_horiz,
-                ),
-                label: Text(
-                  selected.doorType == DoorType.swing ? '左右反転' : '引き方向反転',
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 9, 8, 9),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      '中受接続点数',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  IconButton(
+                    key: const ValueKey('decrease-connection-points'),
+                    tooltip: '中受接続点を1つ減らす',
+                    onPressed: intermediateCount <= 0
+                        ? null
+                        : () {
+                            state.setIntermediatePointCountForGroup(
+                              group,
+                              intermediateCount - 1,
+                            );
+                            reinforcementPriceDrafts.clear();
+                            setState(() => selectedConnectionPointId = null);
+                          },
+                    icon: const Icon(CupertinoIcons.minus_circle),
+                  ),
+                  SizedBox(
+                    width: 34,
+                    child: Text(
+                      '$intermediateCount',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  IconButton(
+                    key: const ValueKey('increase-connection-points'),
+                    tooltip: '中受接続点を1つ追加',
+                    onPressed: intermediateCount >= 99
+                        ? null
+                        : () {
+                            state.setIntermediatePointCountForGroup(
+                              group,
+                              intermediateCount + 1,
+                            );
+                            reinforcementPriceDrafts.clear();
+                            setState(() => selectedConnectionPointId = null);
+                          },
+                    icon: const Icon(CupertinoIcons.plus_circle),
+                  ),
+                ],
+              ),
+            ),
+            if (manual)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  key: const ValueKey('reset-connection-points'),
+                  onPressed: () {
+                    state.resetIntermediatePointsForGroup(group);
+                    reinforcementPriceDrafts.clear();
+                    setState(() => selectedConnectionPointId = null);
+                  },
+                  icon: const Icon(CupertinoIcons.refresh),
+                  label: const Text('自動配置に戻す'),
                 ),
               ),
-            ],
-            if (selected is PlanObject && selected.fixture == 'toilet') ...[
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: () => state.rotateToilet(selected),
-                icon: const Icon(Icons.rotate_right),
-                label: const Text('90度回転'),
-              ),
-            ],
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: state.deleteSelected,
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('削除'),
+            const Divider(height: 26),
+            Text(
+              '接続点ごとの使用部品',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
             ),
+            const SizedBox(height: 10),
+            for (var index = 0; index < points.length; index++)
+              _connectionPointEditorCard(group, points[index], index),
           ],
-          const Divider(height: 32),
-          Text(
-            '施工箇所 ${state.handrailEstimateGroups().length}件',
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          ...state.lines.map(
-            (line) => ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                'No.${state.constructionNumberFor(line)} ${state.handrailPlace(line)}',
-              ),
-              subtitle: Text(
-                '${line.lengthMm}mm / ${line.environment.label} / '
-                '${line.installationType.label}',
-              ),
-              onTap: () => state.select(line.id),
-            ),
-          ),
-        ],
+        ),
       ),
     );
+  }
+
+  Widget _connectionPointEditorCard(
+    HandrailEstimateGroup group,
+    HandrailConnectionPoint point,
+    int index,
+  ) {
+    final products = state.jointProductsForKind(point.kind);
+    final productId = point.jointProduct?.id;
+    final selected = selectedConnectionPointId == point.id;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Card(
+        key: ValueKey('connection-point-card-${index + 1}'),
+        color: selected ? Theme.of(context).colorScheme.primaryContainer : null,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => setState(() => selectedConnectionPointId = point.id),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 28,
+                      height: 28,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHighest,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        '${index + 1}',
+                        style: TextStyle(
+                          color: selected
+                              ? Theme.of(context).colorScheme.onPrimary
+                              : null,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            point.kind.label,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          Text(
+                            'x ${point.point.xMm} / y ${point.point.yMm}mm',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    Text(
+                      formatYen(point.jointProduct?.unitPrice ?? 0),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  key: ValueKey(
+                    'connection-product-${point.id}-${productId ?? 'none'}',
+                  ),
+                  initialValue:
+                      products.any((product) => product.id == productId)
+                      ? productId
+                      : null,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: '使用部品'),
+                  items: products
+                      .map(
+                        (product) => DropdownMenuItem(
+                          value: product.id,
+                          child: Text(
+                            '${product.type.shortLabel}  ${product.id}  '
+                            '${product.name}',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: products.isEmpty
+                      ? null
+                      : (value) {
+                          if (value == null) return;
+                          state.setConnectionPointProduct(group, point, value);
+                          setState(() => selectedConnectionPointId = point.id);
+                        },
+                ),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  key: ValueKey('reinforcement-plate-${point.id}'),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: point.hasReinforcementPlate,
+                  title: const Text(
+                    '補強板',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: Text(
+                    point.hasReinforcementPlate
+                        ? 'この接続点へ補強板を追加'
+                        : 'チェックすると5,000円で追加',
+                  ),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    state.setConnectionPointReinforcementPlate(
+                      group,
+                      point,
+                      value,
+                    );
+                    if (value) {
+                      reinforcementPriceDrafts[point.id] =
+                          '${AppState.defaultReinforcementPlatePrice}';
+                    } else {
+                      reinforcementPriceDrafts.remove(point.id);
+                    }
+                    setState(() => selectedConnectionPointId = point.id);
+                  },
+                ),
+                if (point.hasReinforcementPlate)
+                  TextFormField(
+                    key: ValueKey('reinforcement-price-${point.id}'),
+                    initialValue:
+                        reinforcementPriceDrafts[point.id] ??
+                        '${point.reinforcementPlatePrice}',
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(
+                      labelText: '補強板単価',
+                      suffixText: '円',
+                    ),
+                    onChanged: (value) =>
+                        reinforcementPriceDrafts[point.id] = value,
+                    onFieldSubmitted: (_) =>
+                        _commitReinforcementPrice(group, point),
+                    onTapOutside: (_) {
+                      _commitReinforcementPrice(group, point);
+                      FocusManager.instance.primaryFocus?.unfocus();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _commitReinforcementPrice(
+    HandrailEstimateGroup group,
+    HandrailConnectionPoint point,
+  ) {
+    final current = state
+        .connectionPointsForGroup(group)
+        .where((candidate) => candidate.id == point.id)
+        .firstOrNull;
+    if (current == null || !current.hasReinforcementPlate) return;
+    final parsed = int.tryParse(
+      reinforcementPriceDrafts[point.id] ??
+          '${current.reinforcementPlatePrice}',
+    );
+    final price = parsed ?? AppState.defaultReinforcementPlatePrice;
+    reinforcementPriceDrafts[point.id] = '$price';
+    if (price != current.reinforcementPlatePrice) {
+      state.setConnectionPointReinforcementPlatePrice(group, current, price);
+    }
   }
 
   Future<void> _editSelected() async {
     final selected = state.selected;
     if (selected is WorkLine) {
-      await showWorkLineEditor(context, state, selected);
+      await showWorkLineEditor(
+        context,
+        state,
+        selected,
+        onEditConnectionPoints: () => _openConnectionEditor(selected),
+      );
     } else if (selected is PlanObject) {
       await _showObjectEditor(selected);
     }
@@ -1757,7 +2289,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     var doorType = item.doorType;
     var doorFlipped = item.flipped;
     var doorOpensOutward = item.opensOutward;
-    var toiletRotation = item.rotationQuarterTurns;
+    var fixtureRotation = item.rotationQuarterTurns;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1777,7 +2309,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    '${item.kind.label}を編集',
+                    '${item.fixtureType?.label ?? item.kind.label}を編集',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -1823,7 +2355,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
                         ),
                       ],
                     ),
-                  if (item.fixture == 'toilet') ...[
+                  if (item.kind == PlanObjectKind.fixture) ...[
                     const SizedBox(height: 16),
                     const Text(
                       '回転角度',
@@ -1837,15 +2369,15 @@ class _DrawingScreenState extends State<DrawingScreen> {
                         ButtonSegment<int>(value: 2, label: Text('180°')),
                         ButtonSegment<int>(value: 3, label: Text('270°')),
                       ],
-                      selected: {toiletRotation},
+                      selected: {fixtureRotation},
                       onSelectionChanged: (values) {
                         final next = values.first;
-                        if ((next - toiletRotation).abs().isOdd) {
+                        if ((next - fixtureRotation).abs().isOdd) {
                           final oldWidth = width.text;
                           width.text = height.text;
                           height.text = oldWidth;
                         }
-                        setSheetState(() => toiletRotation = next);
+                        setSheetState(() => fixtureRotation = next);
                       },
                     ),
                   ],
@@ -1930,8 +2462,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
                       item.flipped = doorFlipped;
                       item.opensOutward =
                           doorType == DoorType.swing && doorOpensOutward;
-                      if (item.fixture == 'toilet') {
-                        state.applyToiletRotation(item, toiletRotation);
+                      if (item.kind == PlanObjectKind.fixture) {
+                        state.applyFixtureRotation(item, fixtureRotation);
                       }
                       if (item.isWallAttached) {
                         final desired = math.max(
@@ -2313,106 +2845,28 @@ class _DrawingScreenState extends State<DrawingScreen> {
   }
 }
 
-class _ToolButton extends StatelessWidget {
-  const _ToolButton({
-    super.key,
-    this.icon,
-    this.iconWidget,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.enabled = true,
-    this.color,
-  });
+class _FixtureToolIcon extends StatelessWidget {
+  const _FixtureToolIcon({required this.type, required this.selected});
 
-  final IconData? icon;
-  final Widget? iconWidget;
-  final String label;
+  final FixtureType type;
   final bool selected;
-  final VoidCallback onTap;
-  final bool enabled;
-  final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    final foreground = color ?? Theme.of(context).colorScheme.primary;
-    final scheme = Theme.of(context).colorScheme;
-    final scaledLabel = MediaQuery.textScalerOf(context).scale(11);
-    final extraWidth = math.max(0, scaledLabel - 11) * 4;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Semantics(
-        button: true,
-        selected: selected,
-        enabled: enabled,
-        label: label,
-        child: Tooltip(
-          message: label,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(7),
-            onTap: enabled ? onTap : null,
-            child: Opacity(
-              opacity: enabled ? 1 : .35,
-              child: Container(
-                width: (66 + extraWidth).toDouble(),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? foreground.withValues(alpha: .12)
-                      : Colors.transparent,
-                  border: Border.all(
-                    width: selected ? 1.5 : 1,
-                    color: selected ? foreground : Colors.transparent,
-                  ),
-                  borderRadius: BorderRadius.circular(7),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    iconWidget ??
-                        Icon(
-                          icon,
-                          size: 22,
-                          color: selected || color != null
-                              ? foreground
-                              : scheme.onSurfaceVariant,
-                        ),
-                    const SizedBox(height: 2),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        fontWeight: selected
-                            ? FontWeight.w800
-                            : FontWeight.w600,
-                        color: selected ? foreground : scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+    final aspect = type.defaultWidthMm / type.defaultHeightMm;
+    final width = math.min(30.0, 23.0 * aspect);
+    final height = math.min(23.0, 30.0 / aspect);
+    return SizedBox(
+      width: width,
+      height: height,
+      child: CustomPaint(
+        painter: FixturePainter(
+          type: type,
+          selected: selected,
+          rotationQuarterTurns: 0,
+          selectionColor: Theme.of(context).colorScheme.primary,
         ),
       ),
     );
   }
-}
-
-class _ToiletToolIcon extends StatelessWidget {
-  const _ToiletToolIcon({required this.selected});
-
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) => SizedBox.square(
-    dimension: 23,
-    child: CustomPaint(
-      painter: ToiletPainter(
-        selected: selected,
-        rotationQuarterTurns: 0,
-        selectionColor: Theme.of(context).colorScheme.primary,
-      ),
-    ),
-  );
 }

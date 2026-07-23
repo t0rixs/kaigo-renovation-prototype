@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 enum HandrailEnvironment { indoor, outdoor }
 
 extension HandrailEnvironmentLabel on HandrailEnvironment {
@@ -28,12 +30,13 @@ extension HandrailInstallationTypeLabel on HandrailInstallationType {
       );
 }
 
-enum HandrailOrientation { horizontal, vertical }
+enum HandrailOrientation { horizontal, vertical, diagonal }
 
 extension HandrailOrientationLabel on HandrailOrientation {
   String get label => switch (this) {
     HandrailOrientation.horizontal => '横',
     HandrailOrientation.vertical => '縦',
+    HandrailOrientation.diagonal => '斜め',
   };
 }
 
@@ -212,18 +215,37 @@ class RenovationPhotoLocation {
   RenovationPhotoLocation({
     required this.id,
     required this.locationName,
+    required this.xMm,
+    required this.yMm,
+    List<String>? handrailIds,
+    this.handrailNumber = '',
+    this.positionCustomized = false,
+    this.beforeMemo = '',
+    this.afterMemo = '',
     this.beforePhoto,
     this.afterPhoto,
-  });
+  }) : handrailIds = handrailIds ?? [];
 
   String id;
   String locationName;
+  int xMm;
+  int yMm;
+  List<String> handrailIds;
+  String handrailNumber;
+  bool positionCustomized;
+  String beforeMemo;
+  String afterMemo;
   CapturedProjectPhoto? beforePhoto;
   CapturedProjectPhoto? afterPhoto;
 
   CapturedProjectPhoto? photoFor(ProjectPhotoSlot slot) => switch (slot) {
     ProjectPhotoSlot.before => beforePhoto,
     ProjectPhotoSlot.after => afterPhoto,
+  };
+
+  String memoFor(ProjectPhotoSlot slot) => switch (slot) {
+    ProjectPhotoSlot.before => beforeMemo,
+    ProjectPhotoSlot.after => afterMemo,
   };
 
   void setPhoto(ProjectPhotoSlot slot, CapturedProjectPhoto photo) {
@@ -235,9 +257,34 @@ class RenovationPhotoLocation {
     }
   }
 
+  void clearPhoto(ProjectPhotoSlot slot) {
+    switch (slot) {
+      case ProjectPhotoSlot.before:
+        beforePhoto = null;
+      case ProjectPhotoSlot.after:
+        afterPhoto = null;
+    }
+  }
+
+  void setMemo(ProjectPhotoSlot slot, String value) {
+    switch (slot) {
+      case ProjectPhotoSlot.before:
+        beforeMemo = value;
+      case ProjectPhotoSlot.after:
+        afterMemo = value;
+    }
+  }
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'locationName': locationName,
+    'xMm': xMm,
+    'yMm': yMm,
+    'handrailIds': handrailIds,
+    'handrailNumber': handrailNumber,
+    'positionCustomized': positionCustomized,
+    'beforeMemo': beforeMemo,
+    'afterMemo': afterMemo,
     'beforePhoto': beforePhoto?.toJson(),
     'afterPhoto': afterPhoto?.toJson(),
   };
@@ -247,6 +294,15 @@ class RenovationPhotoLocation {
   ) => RenovationPhotoLocation(
     id: json['id'] as String? ?? '',
     locationName: json['locationName'] as String? ?? '',
+    xMm: (json['xMm'] as num).round(),
+    yMm: (json['yMm'] as num).round(),
+    handrailIds: ((json['handrailIds'] as List<dynamic>?) ?? const [])
+        .whereType<String>()
+        .toList(),
+    handrailNumber: json['handrailNumber'] as String? ?? '',
+    positionCustomized: json['positionCustomized'] as bool? ?? false,
+    beforeMemo: json['beforeMemo'] as String? ?? '',
+    afterMemo: json['afterMemo'] as String? ?? '',
     beforePhoto: switch (json['beforePhoto']) {
       final Map<String, dynamic> value => CapturedProjectPhoto.fromJson(value),
       _ => null,
@@ -310,8 +366,8 @@ class RenovationProject {
   }
 
   factory RenovationProject.fromJson(Map<String, dynamic> json) {
-    final drawing = json['drawing'] as Map<String, dynamic>? ?? json;
-    final canvas = drawing['canvas'] as Map<String, dynamic>? ?? const {};
+    final drawing = json['drawing'] as Map<String, dynamic>;
+    final canvas = drawing['canvas'] as Map<String, dynamic>;
     final storedWidth = _canvasDimension(
       canvas['widthMm'],
       defaultCanvasWidthMm,
@@ -321,45 +377,117 @@ class RenovationProject {
       defaultCanvasHeightMm,
     );
     return RenovationProject(
-      id: json['id'] as String? ?? '',
+      id: json['id'] as String,
       customer: CustomerInfo.fromJson(
-        json['basicInfo'] as Map<String, dynamic>? ??
-            json['customer'] as Map<String, dynamic>? ??
-            const {},
+        json['basicInfo'] as Map<String, dynamic>,
       ),
-      objects: ((drawing['objects'] as List<dynamic>?) ?? const [])
+      objects: (drawing['objects'] as List<dynamic>)
           .map((item) => PlanObject.fromJson(item as Map<String, dynamic>))
           .toList(),
-      lines:
-          ((drawing['handrails'] as List<dynamic>?) ??
-                  (drawing['lines'] as List<dynamic>?) ??
-                  const [])
-              .map((item) => WorkLine.fromJson(item as Map<String, dynamic>))
-              .toList(),
+      lines: (drawing['handrails'] as List<dynamic>)
+          .map((item) => WorkLine.fromJson(item as Map<String, dynamic>))
+          .toList(),
       canvasWidthMm: storedWidth,
       canvasHeightMm: storedHeight,
-      sharedWallOverrides:
-          ((drawing['sharedWalls'] as List<dynamic>?) ?? const [])
-              .map(
-                (item) =>
-                    SharedWallSegment.fromJson(item as Map<String, dynamic>),
-              )
-              .toList(),
+      sharedWallOverrides: (drawing['sharedWalls'] as List<dynamic>)
+          .map(
+            (item) => SharedWallSegment.fromJson(item as Map<String, dynamic>),
+          )
+          .toList(),
       documents: ProjectDocuments.fromJson(
-        json['documents'] as Map<String, dynamic>? ?? const {},
+        json['documents'] as Map<String, dynamic>,
       ),
-      photoLocations: ((json['photos'] as List<dynamic>?) ?? const [])
+      photoLocations: (json['photos'] as List<dynamic>)
           .map(
             (item) =>
                 RenovationPhotoLocation.fromJson(item as Map<String, dynamic>),
           )
           .where((item) => item.id.isNotEmpty)
           .toList(),
-      updatedAt:
-          DateTime.tryParse(json['updatedAt'] as String? ?? '')?.toLocal() ??
-          DateTime.now(),
+      updatedAt: DateTime.parse(json['updatedAt'] as String).toLocal(),
     );
   }
+}
+
+enum JointProductType {
+  endBracket,
+  intermediateBracket,
+  lShapeConnection,
+  twoDimensionalConnection,
+  threeDimensionalConnection,
+}
+
+extension JointProductTypeLabel on JointProductType {
+  String get label => switch (this) {
+    JointProductType.endBracket => '端部ブラケット',
+    JointProductType.intermediateBracket => '中受ブラケット',
+    JointProductType.lShapeConnection => 'L字接続ジョイント',
+    JointProductType.twoDimensionalConnection => '2次元接続ジョイント',
+    JointProductType.threeDimensionalConnection => '3次元接続ジョイント',
+  };
+
+  String get groupLabel => switch (this) {
+    JointProductType.endBracket => '端部ブラケット',
+    JointProductType.intermediateBracket => '中受ブラケット',
+    JointProductType.lShapeConnection ||
+    JointProductType.twoDimensionalConnection ||
+    JointProductType.threeDimensionalConnection => '接続ジョイント',
+  };
+
+  String get shortLabel => switch (this) {
+    JointProductType.endBracket => '端部',
+    JointProductType.intermediateBracket => '中受',
+    JointProductType.lShapeConnection => 'L字',
+    JointProductType.twoDimensionalConnection => '2次元',
+    JointProductType.threeDimensionalConnection => '3次元',
+  };
+
+  int get sortOrder => switch (this) {
+    JointProductType.endBracket => 0,
+    JointProductType.intermediateBracket => 1,
+    JointProductType.lShapeConnection => 2,
+    JointProductType.twoDimensionalConnection => 3,
+    JointProductType.threeDimensionalConnection => 4,
+  };
+
+  bool get isConnection => switch (this) {
+    JointProductType.endBracket ||
+    JointProductType.intermediateBracket => false,
+    JointProductType.lShapeConnection ||
+    JointProductType.twoDimensionalConnection ||
+    JointProductType.threeDimensionalConnection => true,
+  };
+}
+
+class JointProduct {
+  JointProduct({
+    required this.id,
+    required this.name,
+    required this.type,
+    required this.unitPrice,
+  });
+
+  String id;
+  String name;
+  JointProductType type;
+  int unitPrice;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'type': type.name,
+    'unitPrice': unitPrice,
+  };
+
+  factory JointProduct.fromJson(Map<String, dynamic> json) => JointProduct(
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    type: JointProductType.values.firstWhere(
+      (type) => type.name == json['type'],
+      orElse: () => JointProductType.endBracket,
+    ),
+    unitPrice: (json['unitPrice'] as num?)?.round() ?? 0,
+  );
 }
 
 class HandrailProduct {
@@ -369,9 +497,11 @@ class HandrailProduct {
     required this.environmentTags,
     required this.diameterMm,
     required this.railPricePerMeter,
-    required this.jointPrice,
     required this.postPrice,
     required this.maxJointIntervalMm,
+    this.defaultEndBracketId,
+    this.defaultIntermediateBracketId,
+    this.defaultLJointId,
   });
 
   String id;
@@ -379,9 +509,11 @@ class HandrailProduct {
   Set<HandrailEnvironment> environmentTags;
   int diameterMm;
   int railPricePerMeter;
-  int jointPrice;
   int postPrice;
   int maxJointIntervalMm;
+  String? defaultEndBracketId;
+  String? defaultIntermediateBracketId;
+  String? defaultLJointId;
 
   bool supports(HandrailEnvironment environment) =>
       environmentTags.contains(environment);
@@ -392,9 +524,11 @@ class HandrailProduct {
     'environmentTags': environmentTags.map((tag) => tag.name).toList(),
     'diameterMm': diameterMm,
     'railPricePerMeter': railPricePerMeter,
-    'jointPrice': jointPrice,
     'postPrice': postPrice,
     'maxJointIntervalMm': maxJointIntervalMm,
+    'defaultEndBracketId': defaultEndBracketId,
+    'defaultIntermediateBracketId': defaultIntermediateBracketId,
+    'defaultLJointId': defaultLJointId,
   };
 
   factory HandrailProduct.fromJson(Map<String, dynamic> json) =>
@@ -406,11 +540,60 @@ class HandrailProduct {
             .toSet(),
         diameterMm: (json['diameterMm'] as num?)?.round() ?? 35,
         railPricePerMeter: (json['railPricePerMeter'] as num?)?.round() ?? 0,
-        jointPrice: (json['jointPrice'] as num?)?.round() ?? 0,
         postPrice: (json['postPrice'] as num?)?.round() ?? 0,
         maxJointIntervalMm:
             (json['maxJointIntervalMm'] as num?)?.round() ?? 1000,
+        defaultEndBracketId: json['defaultEndBracketId'] as String?,
+        defaultIntermediateBracketId:
+            json['defaultIntermediateBracketId'] as String?,
+        defaultLJointId: json['defaultLJointId'] as String?,
       );
+}
+
+enum FixtureType {
+  toilet,
+  diningTable,
+  kitchen,
+  refrigerator,
+  wardrobe,
+  bathtub,
+}
+
+extension FixtureTypeDetails on FixtureType {
+  String get label => switch (this) {
+    FixtureType.toilet => 'トイレ',
+    FixtureType.diningTable => 'ダイニングテーブル',
+    FixtureType.kitchen => 'キッチン',
+    FixtureType.refrigerator => '冷蔵庫',
+    FixtureType.wardrobe => 'タンス',
+    FixtureType.bathtub => '浴槽',
+  };
+
+  String get menuLabel => switch (this) {
+    FixtureType.diningTable => 'テーブル',
+    _ => label,
+  };
+
+  int get defaultWidthMm => switch (this) {
+    FixtureType.toilet => 500,
+    FixtureType.diningTable => 1500,
+    FixtureType.kitchen => 2500,
+    FixtureType.refrigerator => 750,
+    FixtureType.wardrobe => 2000,
+    FixtureType.bathtub => 1500,
+  };
+
+  int get defaultHeightMm => switch (this) {
+    FixtureType.toilet => 1000,
+    FixtureType.diningTable => 1250,
+    FixtureType.kitchen => 750,
+    FixtureType.refrigerator => 1000,
+    FixtureType.wardrobe => 1000,
+    FixtureType.bathtub => 750,
+  };
+
+  static FixtureType? fromName(String? value) =>
+      FixtureType.values.where((type) => type.name == value).firstOrNull;
 }
 
 enum PlanObjectKind { layout, fixture, door }
@@ -544,6 +727,8 @@ class PlanObject {
 
   int get rotationDegrees => (rotationQuarterTurns % 4) * 90;
 
+  FixtureType? get fixtureType => FixtureTypeDetails.fromName(fixture);
+
   bool get isWallAttached => kind == PlanObjectKind.door;
 
   bool get isHorizontalWall =>
@@ -574,9 +759,7 @@ class PlanObject {
         'Unsupported plan object kind: ${json['kind']}',
       ),
     ),
-    place: ((json['place'] as String?)?.trim().isNotEmpty ?? false)
-        ? json['place'] as String
-        : json['label'] as String? ?? '',
+    place: json['place'] as String? ?? '',
     xMm: (json['xMm'] as num?)?.round() ?? 0,
     yMm: (json['yMm'] as num?)?.round() ?? 0,
     widthMm: (json['widthMm'] as num?)?.round() ?? 500,
@@ -610,7 +793,11 @@ class WorkLine {
     this.constructionNumber = '1',
     this.environment = HandrailEnvironment.indoor,
     this.installationType = HandrailInstallationType.wallMounted,
-  });
+    this.manualIntermediatePointCount,
+    Map<String, String>? connectionProductOverrides,
+    Map<String, int>? reinforcementPlatePrices,
+  }) : connectionProductOverrides = connectionProductOverrides ?? {},
+       reinforcementPlatePrices = reinforcementPlatePrices ?? {};
 
   String id;
   String place;
@@ -623,12 +810,23 @@ class WorkLine {
   String constructionNumber;
   HandrailEnvironment environment;
   HandrailInstallationType installationType;
+  int? manualIntermediatePointCount;
+  Map<String, String> connectionProductOverrides;
+  Map<String, int> reinforcementPlatePrices;
 
   bool get isHorizontal => y1Mm == y2Mm;
-  int get lengthMm => isHorizontal ? (x2Mm - x1Mm).abs() : (y2Mm - y1Mm).abs();
+  bool get isVertical => x1Mm == x2Mm;
+  int get lengthMm {
+    final dx = x2Mm - x1Mm;
+    final dy = y2Mm - y1Mm;
+    return math.sqrt(dx * dx + dy * dy).round();
+  }
+
   HandrailOrientation get orientation => isHorizontal
       ? HandrailOrientation.horizontal
-      : HandrailOrientation.vertical;
+      : isVertical
+      ? HandrailOrientation.vertical
+      : HandrailOrientation.diagonal;
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -642,6 +840,9 @@ class WorkLine {
     'constructionNumber': constructionNumber,
     'environment': environment.name,
     'installationType': installationType.name,
+    'manualIntermediatePointCount': manualIntermediatePointCount,
+    'connectionProductOverrides': connectionProductOverrides,
+    'reinforcementPlatePrices': reinforcementPlatePrices,
   };
 
   factory WorkLine.fromJson(Map<String, dynamic> json) => WorkLine(
@@ -660,6 +861,15 @@ class WorkLine {
     installationType: HandrailInstallationTypeLabel.fromName(
       json['installationType'] as String?,
     ),
+    manualIntermediatePointCount: (json['manualIntermediatePointCount'] as num?)
+        ?.round(),
+    connectionProductOverrides:
+        ((json['connectionProductOverrides'] as Map<String, dynamic>?) ?? {})
+            .map((key, value) => MapEntry(key, value as String)),
+    reinforcementPlatePrices:
+        ((json['reinforcementPlatePrices'] as Map<String, dynamic>?) ?? {}).map(
+          (key, value) => MapEntry(key, (value as num).round()),
+        ),
   );
 }
 
@@ -668,6 +878,69 @@ class HandrailPoint {
 
   final int xMm;
   final int yMm;
+}
+
+enum HandrailConnectionKind { endBracket, intermediateBracket, connectionJoint }
+
+extension HandrailConnectionKindLabel on HandrailConnectionKind {
+  String get label => switch (this) {
+    HandrailConnectionKind.endBracket => '端部ブラケット',
+    HandrailConnectionKind.intermediateBracket => '中受ブラケット',
+    HandrailConnectionKind.connectionJoint => '接続ジョイント',
+  };
+
+  bool accepts(JointProductType type) => switch (this) {
+    HandrailConnectionKind.endBracket => type == JointProductType.endBracket,
+    HandrailConnectionKind.intermediateBracket =>
+      type == JointProductType.intermediateBracket,
+    HandrailConnectionKind.connectionJoint => type.isConnection,
+  };
+}
+
+class HandrailConnectionReference {
+  const HandrailConnectionReference({
+    required this.lineId,
+    required this.pointKey,
+  });
+
+  final String lineId;
+  final String pointKey;
+}
+
+class HandrailConnectionPoint {
+  const HandrailConnectionPoint({
+    required this.id,
+    required this.point,
+    required this.kind,
+    required this.jointProduct,
+    required this.references,
+    required this.angleRadians,
+    required this.freestanding,
+    required this.postPrice,
+    required this.hasReinforcementPlate,
+    required this.reinforcementPlatePrice,
+  });
+
+  final String id;
+  final HandrailPoint point;
+  final HandrailConnectionKind kind;
+  final JointProduct? jointProduct;
+  final List<HandrailConnectionReference> references;
+  final double angleRadians;
+  final bool freestanding;
+  final int postPrice;
+  final bool hasReinforcementPlate;
+  final int reinforcementPlatePrice;
+
+  JointProductType get displayType =>
+      jointProduct?.type ??
+      switch (kind) {
+        HandrailConnectionKind.endBracket => JointProductType.endBracket,
+        HandrailConnectionKind.intermediateBracket =>
+          JointProductType.intermediateBracket,
+        HandrailConnectionKind.connectionJoint =>
+          JointProductType.lShapeConnection,
+      };
 }
 
 class HandrailPath {
@@ -684,7 +957,7 @@ class HandrailPath {
     if (points.every((point) => point.xMm == first.xMm)) {
       return HandrailOrientation.vertical;
     }
-    return null;
+    return HandrailOrientation.diagonal;
   }
 }
 
@@ -697,25 +970,131 @@ class HandrailEstimateGroup {
   String get id => primary.id;
   int get lengthMm => lines.fold(0, (total, line) => total + line.lengthMm);
   bool get isConnected => lines.length > 1;
+  bool get hasDirectionChange => lines.indexed.any((entry) {
+    final (index, line) = entry;
+    final dx = line.x2Mm - line.x1Mm;
+    final dy = line.y2Mm - line.y1Mm;
+    return lines.skip(index + 1).any((other) {
+      final otherDx = other.x2Mm - other.x1Mm;
+      final otherDy = other.y2Mm - other.y1Mm;
+      return dx * otherDy - dy * otherDx != 0;
+    });
+  });
+
+  bool get hasOnlyRightAngleChanges {
+    var foundChange = false;
+    for (var index = 0; index < lines.length; index++) {
+      final line = lines[index];
+      final dx = line.x2Mm - line.x1Mm;
+      final dy = line.y2Mm - line.y1Mm;
+      for (final other in lines.skip(index + 1)) {
+        final otherDx = other.x2Mm - other.x1Mm;
+        final otherDy = other.y2Mm - other.y1Mm;
+        if (dx * otherDy - dy * otherDx == 0) continue;
+        foundChange = true;
+        if (dx * otherDx + dy * otherDy != 0) return false;
+      }
+    }
+    return foundChange;
+  }
+
+  String get shapeLabel => !hasDirectionChange
+      ? ''
+      : hasOnlyRightAngleChanges
+      ? 'L字'
+      : '角度付き';
 }
 
 class HandrailCostBreakdown {
   const HandrailCostBreakdown({
-    required this.jointCount,
+    required this.endBracketCount,
+    required this.intermediateBracketCount,
+    required this.connectionJointCount,
     required this.postCount,
     required this.railCost,
-    required this.jointCost,
+    required this.endBracketCost,
+    required this.intermediateBracketCost,
+    required this.connectionJointCost,
     required this.postCost,
+    required this.reinforcementPlateCount,
+    required this.reinforcementPlateCost,
   });
 
-  final int jointCount;
+  final int endBracketCount;
+  final int intermediateBracketCount;
+  final int connectionJointCount;
   final int postCount;
   final int railCost;
-  final int jointCost;
+  final int endBracketCost;
+  final int intermediateBracketCost;
+  final int connectionJointCost;
   final int postCost;
+  final int reinforcementPlateCount;
+  final int reinforcementPlateCost;
 
-  int get total => railCost + jointCost + postCost;
+  int get jointCount =>
+      endBracketCount + intermediateBracketCount + connectionJointCount;
+  int get jointCost =>
+      endBracketCost + intermediateBracketCost + connectionJointCost;
+  int get total => railCost + jointCost + postCost + reinforcementPlateCost;
 }
+
+List<JointProduct> defaultJointProducts() => [
+  JointProduct(
+    id: 'EB-35-WH',
+    name: '樹脂被覆端部ブラケット',
+    type: JointProductType.endBracket,
+    unitPrice: 1250,
+  ),
+  JointProduct(
+    id: 'EB-35-BR',
+    name: '木製手すり用端部ブラケット',
+    type: JointProductType.endBracket,
+    unitPrice: 1450,
+  ),
+  JointProduct(
+    id: 'EB-34-OD',
+    name: '屋外用端部ブラケット',
+    type: JointProductType.endBracket,
+    unitPrice: 1800,
+  ),
+  JointProduct(
+    id: 'MB-35-WH',
+    name: '樹脂被覆中受ブラケット',
+    type: JointProductType.intermediateBracket,
+    unitPrice: 1250,
+  ),
+  JointProduct(
+    id: 'MB-35-BR',
+    name: '木製手すり用中受ブラケット',
+    type: JointProductType.intermediateBracket,
+    unitPrice: 1450,
+  ),
+  JointProduct(
+    id: 'MB-34-OD',
+    name: '屋外用中受ブラケット',
+    type: JointProductType.intermediateBracket,
+    unitPrice: 1800,
+  ),
+  JointProduct(
+    id: 'CJ-L-35',
+    name: 'L字接続ジョイント',
+    type: JointProductType.lShapeConnection,
+    unitPrice: 1250,
+  ),
+  JointProduct(
+    id: 'CJ-2D-35',
+    name: '2次元自在ジョイント',
+    type: JointProductType.twoDimensionalConnection,
+    unitPrice: 2200,
+  ),
+  JointProduct(
+    id: 'CJ-3D-35',
+    name: '3次元自在ジョイント',
+    type: JointProductType.threeDimensionalConnection,
+    unitPrice: 2800,
+  ),
+];
 
 List<HandrailProduct> defaultHandrailProducts() => [
   HandrailProduct(
@@ -724,9 +1103,11 @@ List<HandrailProduct> defaultHandrailProducts() => [
     environmentTags: {HandrailEnvironment.indoor},
     diameterMm: 35,
     railPricePerMeter: 4400,
-    jointPrice: 1250,
     postPrice: 3800,
     maxJointIntervalMm: 1000,
+    defaultEndBracketId: 'EB-35-WH',
+    defaultIntermediateBracketId: 'MB-35-WH',
+    defaultLJointId: 'CJ-L-35',
   ),
   HandrailProduct(
     id: 'demo-outdoor-34',
@@ -734,8 +1115,10 @@ List<HandrailProduct> defaultHandrailProducts() => [
     environmentTags: {HandrailEnvironment.outdoor},
     diameterMm: 34,
     railPricePerMeter: 7200,
-    jointPrice: 1800,
     postPrice: 6500,
     maxJointIntervalMm: 1000,
+    defaultEndBracketId: 'EB-34-OD',
+    defaultIntermediateBracketId: 'MB-34-OD',
+    defaultLJointId: 'CJ-L-35',
   ),
 ];

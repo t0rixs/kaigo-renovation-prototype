@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
@@ -134,8 +136,8 @@ class _EstimateLine extends StatelessWidget {
                   _meta(
                     context,
                     Icons.swap_horiz,
-                    group.isConnected
-                        ? 'L字'
+                    group.hasDirectionChange
+                        ? group.shapeLabel
                         : (path.orientation ?? line.orientation).label,
                   ),
                   if (group.isConnected)
@@ -153,8 +155,26 @@ class _EstimateLine extends StatelessWidget {
                   _meta(
                     context,
                     Icons.radio_button_checked,
-                    'ジョイント ${cost.jointCount}個',
+                    '端部 ${cost.endBracketCount}個',
                   ),
+                  _meta(
+                    context,
+                    Icons.adjust,
+                    '中受 ${cost.intermediateBracketCount}個',
+                  ),
+                  if (cost.connectionJointCount > 0)
+                    _meta(
+                      context,
+                      Icons.account_tree_outlined,
+                      '接続 ${cost.connectionJointCount}個',
+                    ),
+                  if (cost.reinforcementPlateCount > 0)
+                    _meta(
+                      context,
+                      Icons.check_box_outlined,
+                      '補強板 ${cost.reinforcementPlateCount}枚',
+                    ),
+                  _meta(context, Icons.functions, '部品計 ${cost.jointCount}個'),
                   _meta(
                     context,
                     Icons.vertical_align_bottom,
@@ -164,8 +184,13 @@ class _EstimateLine extends StatelessWidget {
               ),
               const Divider(height: 20),
               _CostRow(label: '手すり本体', value: cost.railCost),
-              _CostRow(label: 'ジョイント', value: cost.jointCost),
+              _CostRow(label: '端部ブラケット', value: cost.endBracketCost),
+              _CostRow(label: '中受ブラケット', value: cost.intermediateBracketCost),
+              if (cost.connectionJointCount > 0)
+                _CostRow(label: '接続ジョイント', value: cost.connectionJointCost),
               _CostRow(label: '柱', value: cost.postCost),
+              if (cost.reinforcementPlateCount > 0)
+                _CostRow(label: '補強板', value: cost.reinforcementPlateCost),
               const SizedBox(height: 4),
               _CostRow(label: '材料原価合計', value: cost.total, strong: true),
             ],
@@ -288,8 +313,9 @@ class _EmptyEstimate extends StatelessWidget {
 Future<void> showWorkLineEditor(
   BuildContext context,
   AppState state,
-  WorkLine line,
-) async {
+  WorkLine line, {
+  VoidCallback? onEditConnectionPoints,
+}) async {
   final initialPlace = state.handrailPlace(line);
   final place = TextEditingController(
     text: initialPlace == '場所未設定' ? '' : initialPlace,
@@ -317,25 +343,28 @@ Future<void> showWorkLineEditor(
           }
           final previewLength = parseInt(length.text).clamp(
             AppState.gridMm,
-            line.isHorizontal ? state.canvasWidthMm : state.canvasHeightMm,
+            math
+                .sqrt(
+                  state.canvasWidthMm * state.canvasWidthMm +
+                      state.canvasHeightMm * state.canvasHeightMm,
+                )
+                .round(),
           );
-          final horizontalDirection = line.x2Mm >= line.x1Mm ? 1 : -1;
-          final verticalDirection = line.y2Mm >= line.y1Mm ? 1 : -1;
           final preview = WorkLine(
             id: line.id,
             place: place.text,
             x1Mm: line.x1Mm,
             y1Mm: line.y1Mm,
-            x2Mm: line.isHorizontal
-                ? line.x1Mm + horizontalDirection * previewLength
-                : line.x1Mm,
-            y2Mm: line.isHorizontal
-                ? line.y1Mm
-                : line.y1Mm + verticalDirection * previewLength,
+            x2Mm: line.x2Mm,
+            y2Mm: line.y2Mm,
             productId: productId,
             environment: environment,
             installationType: installationType,
+            manualIntermediatePointCount: line.manualIntermediatePointCount,
+            connectionProductOverrides: Map.of(line.connectionProductOverrides),
+            reinforcementPlatePrices: Map.of(line.reinforcementPlatePrices),
           );
+          state.setLineLength(preview, previewLength);
           final previewCost = state.costFor(preview);
 
           return Padding(
@@ -483,18 +512,53 @@ Future<void> showWorkLineEditor(
                     child: Column(
                       children: [
                         _PreviewRow(
-                          label: 'ジョイント',
-                          value: '${previewCost.jointCount}個',
+                          label: '端部ブラケット',
+                          value: '${previewCost.endBracketCount}個',
                         ),
+                        _PreviewRow(
+                          label: '中受ブラケット',
+                          value: '${previewCost.intermediateBracketCount}個',
+                        ),
+                        if (previewCost.connectionJointCount > 0)
+                          _PreviewRow(
+                            label: '接続ジョイント',
+                            value: '${previewCost.connectionJointCount}個',
+                          ),
                         _PreviewRow(
                           label: '柱',
                           value: '${previewCost.postCount}本',
                         ),
+                        if (previewCost.reinforcementPlateCount > 0)
+                          _PreviewRow(
+                            label: '補強板',
+                            value:
+                                '${previewCost.reinforcementPlateCount}枚  '
+                                '${formatYen(previewCost.reinforcementPlateCost)}',
+                          ),
                         _PreviewRow(
                           label: '材料原価',
                           value: formatYen(previewCost.total),
                           strong: true,
                         ),
+                        if (onEditConnectionPoints != null) ...[
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              key: const ValueKey(
+                                'open-connection-editor-from-details',
+                              ),
+                              onPressed: () {
+                                Navigator.pop(sheetContext);
+                                WidgetsBinding.instance.addPostFrameCallback(
+                                  (_) => onEditConnectionPoints(),
+                                );
+                              },
+                              icon: const Icon(Icons.hub_outlined),
+                              label: const Text('接続点を編集'),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
